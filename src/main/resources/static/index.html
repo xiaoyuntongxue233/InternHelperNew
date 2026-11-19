@@ -28,7 +28,9 @@
     th.sortable:hover { background: #e6edf0; }
     th .arrow { color: #1f6f63; font-size: 11px; margin-left: 2px; }
     tr:hover td { background: #fafcfd; }
-    .greet { margin-top: 6px; padding: 8px 14px; background: #f6fbf9; border: 1px dashed #a9cfc6; border-radius: 6px; font-size: 15px; line-height: 1.45; white-space: pre-wrap; width: 100%; max-width: none; }
+    .greet { margin-top: 2px; padding: 2px 10px; background: #f6fbf9; border: 1px dashed #a9cfc6; border-radius: 6px; font-size: 13px; line-height: 1.18; white-space: pre-wrap; width: 100%; max-width: none; }
+    .greet button { padding: 1px 6px; font-size: 11px; }
+    .greet .muted { font-size: 11px; }
     .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #e8f3f0; color: #1f6f63; }
     .muted { color: #889; font-size: 12px; }
     .pager { margin-top: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -41,6 +43,7 @@
   <h1>实习投递助手</h1>
   <a href="/form.html">+ 添加岗位</a>
   <a href="/profile.html">个人资料</a>
+  <a href="/settings.html">设置</a>
   <div class="stats" id="stats">加载中…</div>
 </header>
 
@@ -229,7 +232,7 @@
       const trG = document.createElement('tr');
       trG.id = 'gr-' + job.id;
       trG.style.display = 'none';
-      trG.innerHTML = `<td colspan="10" style="padding:0 12px 12px 12px"><div class="greet" id="g-${job.id}"></div></td>`;
+      trG.innerHTML = `<td colspan="10" style="padding:0 12px 3px 12px"><div class="greet" id="g-${job.id}"></div></td>`;
       rows.appendChild(trG);
     });
     refreshStats();
@@ -299,34 +302,60 @@
     load(true);
   }
 
-  async function gen(id) {
+  function renderGreet(id, g) {
+    const box = document.getElementById('g-' + id);
+    if (!box) return;
+    box.dataset.loaded = '1';
+    box.dataset.message = g.message || '';
+    const warnings = (g.warnings || []).map(w => `<div class="muted">${esc(w)}</div>`).join('');
+    box.innerHTML = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="tag">${esc(g.direction)}</span>
+        <span class="muted">${g.months}个月 / 每周${g.days}天 / ${g.length}字</span>
+        <span class="muted">引擎：${esc(g.engine || 'RULE')}${g.templateId ? ' · 模板：' + esc(g.templateId) : ''}</span>
+      </div>
+      <div style="margin-top:2px">${esc(g.message)}</div>
+      <div class="muted" style="margin-top:1px">建议：${esc(g.advice || '')}</div>
+      ${warnings}
+      <div style="margin-top:2px; display:flex; align-items:center; gap:8px">
+        <button onclick="copyGreet(${id})">复制</button>
+        <button onclick="collapseGreet(${id})">收起</button>
+        <button id="regen-${id}" onclick="regenGreet(${id})">重新生成</button>
+      </div>`;
+  }
+
+  async function fetchGreet(id, force) {
     const wrap = document.getElementById('gr-' + id);
     const box = document.getElementById('g-' + id);
     if (!wrap || !box) return;
+    if (!force && box.dataset.loaded === '1') {
+      wrap.style.display = '';
+      return;
+    }
+    const btn = document.getElementById('regen-' + id);
+    if (force && btn) { btn.disabled = true; btn.textContent = '生成中…'; }
+    try {
+      const g = await api(`/api/jobs/${id}/greeting`);
+      renderGreet(id, g);
+      wrap.style.display = '';
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = '重新生成'; }
+      alert('生成话术失败：' + e.message);
+    }
+  }
+
+  async function gen(id) {
+    const wrap = document.getElementById('gr-' + id);
+    if (!wrap) return;
     // 已经展开 → 再点一次收起（不重复请求）
     if (wrap.style.display !== 'none') {
       wrap.style.display = 'none';
       return;
     }
-    if (box.dataset.loaded === '1') {
-      wrap.style.display = '';
-      return;
-    }
-    const g = await api(`/api/jobs/${id}/greeting`);
-    box.dataset.loaded = '1';
-    wrap.style.display = '';
-    box.dataset.message = g.message || '';
-    const warnings = (g.warnings || []).map(w => `<div class="muted">${esc(w)}</div>`).join('');
-    box.innerHTML = `<span class="tag">${esc(g.direction)}</span>
-      <span class="muted">${g.months}个月 / 每周${g.days}天 / ${g.length}字</span>
-      <span class="muted">引擎：${esc(g.engine || 'RULE')}${g.templateId ? ' · 模板：' + esc(g.templateId) : ''}</span>
-      <div style="margin-top:8px">${esc(g.message)}</div>
-      <div class="muted" style="margin-top:8px">建议：${esc(g.advice || '')}</div>
-      ${warnings}
-      <div style="margin-top:8px; display:flex; align-items:center; gap:8px">
-        <button onclick="copyGreet(${id})">复制</button>
-        <button onclick="collapseGreet(${id})">收起</button>
-      </div>`;
+    await fetchGreet(id, false);
+  }
+
+  async function regenGreet(id) {
+    await fetchGreet(id, true);
   }
 
   function collapseGreet(id) {

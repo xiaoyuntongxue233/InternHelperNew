@@ -1,12 +1,9 @@
 package com.zhou.internhelper.service;
 
-import com.zhou.internhelper.config.AiProperties;
-import com.zhou.internhelper.config.BillingProperties;
 import com.zhou.internhelper.entity.AiUsage;
 import com.zhou.internhelper.repository.AiUsageRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -14,79 +11,45 @@ import java.math.RoundingMode;
 /**
  * 额度控制。首期按本机实例计量，userKey 固定为 local。
  * PLATFORM 模式使用平台额度；BYO 模式使用用户自带 API，不扣额度。
+ * 单价、模式、最大输出均从 SettingsService 快照读取，网页保存后立即生效。
  */
 @Service
 public class AiQuotaService {
 
     public static final String LOCAL_USER = "local";
 
-    private static final BigDecimal THOUSAND = BigDecimal.valueOf(1000);
     private static final BigDecimal MILLION = BigDecimal.valueOf(1_000_000);
 
-    private final AiProperties ai;
-    private final BillingProperties billing;
+    private final SettingsService settings;
     private final AiUsageRepository repository;
 
-    public AiQuotaService(AiProperties ai, BillingProperties billing, AiUsageRepository repository) {
-        this.ai = ai;
-        this.billing = billing;
+    public AiQuotaService(SettingsService settings, AiUsageRepository repository) {
+        this.settings = settings;
         this.repository = repository;
+    }
+
+    private SettingsService.SettingsSnapshot snap() {
+        return settings.snapshot();
     }
 
     /** 是否使用用户自带 API */
     public boolean useByo() {
-        return "BYO".equalsIgnoreCase(billing.getMode()) || StringUtils.hasText(ai.getByoApiKey());
+        return snap().useByo();
     }
 
     /** 当前生效的 API Key */
     public String activeApiKey() {
-        return useByo() ? nullToEmpty(ai.getByoApiKey()) : nullToEmpty(ai.getPlatformApiKey());
-    }
-
-    /** 统一换算为 元 / 1M tokens；1K 单价乘以 1000 得到 1M 单价 */
-    private BigDecimal toPerMillion(BigDecimal per1m, BigDecimal per1k) {
-        if (per1m != null && per1m.signum() > 0) {
-            return per1m;
-        }
-        if (per1k != null && per1k.signum() > 0) {
-            return per1k.multiply(THOUSAND);
-        }
-        return BigDecimal.ZERO;
-    }
-
-    /** 缓存未命中的输入单价，单位 元 / 1M tokens */
-    private BigDecimal missPrice() {
-        BigDecimal miss = toPerMillion(ai.getPriceInputCacheMissPer1m(), ai.getPriceInputCacheMissPer1k());
-        if (miss.signum() > 0) {
-            return miss;
-        }
-        return toPerMillion(ai.getPriceInputPer1m(), ai.getPriceInputPer1k());
-    }
-
-    /** 缓存命中的输入单价，单位 元 / 1M tokens；未配置时按未命中价保守估算 */
-    private BigDecimal hitPrice() {
-        BigDecimal hit = toPerMillion(ai.getPriceInputCacheHitPer1m(), ai.getPriceInputCacheHitPer1k());
-        return hit.signum() > 0 ? hit : missPrice();
-    }
-
-    /** 输出单价，单位 元 / 1M tokens */
-    private BigDecimal outputPrice() {
-        return toPerMillion(ai.getPriceOutputPer1m(), ai.getPriceOutputPer1k());
-    }
-
-    /** 预检用最高单价，确保保守 */
-    private BigDecimal unitPrice() {
-        return hitPrice().max(missPrice()).max(outputPrice());
+        return snap().activeApiKey() == null ? "" : snap().activeApiKey();
     }
 
     /** 保守预估：按字符数上界估算 prompt token，再加最大输出 token */
     public BigDecimal estimateCost(String prompt) {
-        BigDecimal unit = unitPrice();
+        BigDecimal unit = snap().highestUnitPrice();
         if (unit.signum() <= 0) {
             return BigDecimal.ZERO;
         }
         int promptTokens = prompt == null ? 0 : prompt.length();
-        long billable = (long) promptTokens + ai.getMaxTokens();
+        long billable = (long) promptTokens + snap().maxTokens();
         return BigDecimal.valueOf(billable)
                 .divide(MILLION, 6, RoundingMode.HALF_UP)
                 .multiply(unit)
@@ -98,19 +61,26 @@ public class AiQuotaService {
         if (useByo()) {
             return true;
         }
-        if (unitPrice().signum() <= 0) {
+        if (snap().highestUnitPrice().signum() <= 0) {
             return false;
         }
         BigDecimal cost = estimatedCost == null ? BigDecimal.ZERO : estimatedCost;
         BigDecimal used = repository.sumPlatformCost(LOCAL_USER);
-        return used.add(cost).compareTo(billing.getDefaultBudgetCny()) <= 0;
+        return used.add(cost).compareTo(snap().budgetCny()) <= 0;
     }
 
     /** 剩余平台额度，单位元 */
     public BigDecimal remainingCny() {
         BigDecimal used = repository.sumPlatformCost(LOCAL_USER);
-        BigDecimal left = billing.getDefaultBudgetCny().subtract(used);
-        return left.signum() < 0 ? BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP) : left.setScale(4, RoundingMode.HALF_UP);
+        BigDecimal left = snap().budgetCny().subtract(used);
+        return left.signum() < 0
+                ? BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP)
+                : left.setScale(4, RoundingMode.HALF_UP);
+    }
+
+    /** 已用平台额度，单位元 */
+    public BigDecimal usedCny() {
+        return repository.sumPlatformCost(LOCAL_USER).setScale(4, RoundingMode.HALF_UP);
     }
 
     /**
@@ -138,22 +108,18 @@ public class AiQuotaService {
         if (useByo()) {
             return BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP);
         }
-        if (usageReported && unitPrice().signum() > 0) {
+        if (usageReported && snap().highestUnitPrice().signum() > 0) {
             int hit = Math.max(0, Math.min(cacheHitTokens, promptTokens));
             int miss = Math.max(0, promptTokens - hit);
             BigDecimal hitCost = BigDecimal.valueOf(hit)
-                    .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(hitPrice());
+                    .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(snap().effectiveHitPrice());
             BigDecimal missCost = BigDecimal.valueOf(miss)
-                    .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(missPrice());
+                    .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(snap().effectiveMissPrice());
             BigDecimal outputCost = BigDecimal.valueOf(completionTokens)
-                    .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(outputPrice());
+                    .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(snap().effectiveOutputPrice());
             return hitCost.add(missCost).add(outputCost).setScale(4, RoundingMode.HALF_UP);
         }
         return estimatedCost == null ? BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP)
                 : estimatedCost.setScale(4, RoundingMode.HALF_UP);
-    }
-
-    private String nullToEmpty(String s) {
-        return s == null ? "" : s;
     }
 }

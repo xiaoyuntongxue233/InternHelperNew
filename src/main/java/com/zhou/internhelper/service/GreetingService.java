@@ -3,6 +3,7 @@ package com.zhou.internhelper.service;
 import com.zhou.internhelper.config.CandidateProperties;
 import com.zhou.internhelper.config.GreetingProperties;
 import com.zhou.internhelper.entity.CandidateProfile;
+import com.zhou.internhelper.service.SettingsService.SettingsSnapshot;
 import com.zhou.internhelper.entity.GreetingRule;
 import com.zhou.internhelper.entity.Job;
 import com.zhou.internhelper.repository.CandidateProfileRepository;
@@ -59,6 +60,7 @@ public class GreetingService {
     private final AiGreetingClient aiClient;
     private final AiQuotaService quota;
     private final GreetingProperties greetingProperties;
+    private final SettingsService settings;
 
     /** 规则正则缓存：key 为规则 id，value 含原始正则；数据库里的正则变了会自动失效 */
     private final ConcurrentHashMap<Long, CachedPattern> patternCache = new ConcurrentHashMap<>();
@@ -69,7 +71,8 @@ public class GreetingService {
                            GreetingTemplateService templateService,
                            AiGreetingClient aiClient,
                            AiQuotaService quota,
-                           GreetingProperties greetingProperties) {
+                           GreetingProperties greetingProperties,
+                           SettingsService settings) {
         this.ruleRepository = ruleRepository;
         this.profileRepository = profileRepository;
         this.candidate = candidate;
@@ -77,6 +80,7 @@ public class GreetingService {
         this.aiClient = aiClient;
         this.quota = quota;
         this.greetingProperties = greetingProperties;
+        this.settings = settings;
     }
 
     public record Greeting(String message, String direction, int months, int days,
@@ -103,26 +107,69 @@ public class GreetingService {
     }
 
     public Greeting generate(Job job, CandidateProfile profileOverride, String styleOverride) {
-        Facts facts = buildFacts(job, profileOverride, styleOverride);
+        SettingsSnapshot s = settings.snapshot();
+        String template = s.template() == null ? "concise" : s.template();
+        boolean free = "free".equalsIgnoreCase(template);
+        Facts facts = buildFacts(job, profileOverride, styleOverride, template);
         GreetingTemplateService.Rendered rendered = templateService.render(facts.style(), facts.variables());
         String draft = rendered.text();
 
-        String engine = greetingProperties.getEngine() == null ? "RULE" : greetingProperties.getEngine();
-        if (!"AI".equalsIgnoreCase(engine) && !"HYBRID".equalsIgnoreCase(engine)) {
+        String engine = s.engine() == null ? "RULE" : s.engine();
+        boolean aiEnabled = "AI".equalsIgnoreCase(engine) || "HYBRID".equalsIgnoreCase(engine);
+        if (!aiEnabled) {
+            if (free) {
+                List<String> warn = List.of("已选择 AI自由生成，但当前是 RULE 模式；已用简洁模板兜底，请切换到 AI / HYBRID。");
+                return new Greeting(draft, facts.direction(), facts.months(), facts.days(),
+                        ADVICE, "RULE", "free", warn, false);
+            }
             return new Greeting(draft, facts.direction(), facts.months(), facts.days(),
                     ADVICE, "RULE", rendered.templateId(), List.of(), false);
         }
-        return generateWithAi(job, facts, rendered.templateId(), draft);
+        if (free) {
+            return generateFreeWithAi(job, facts, draft, s);
+        }
+        return generateWithAi(job, facts, rendered.templateId(), draft, s);
     }
 
-    private Greeting generateWithAi(Job job, Facts facts, String templateId, String draft) {
+    /** AI 自由生成：无模板草稿，直接让模型根据个人资料创作 */
+    private Greeting generateFreeWithAi(Job job, Facts facts, String fallbackDraft, SettingsSnapshot s) {
+        List<String> warnings = new ArrayList<>();
+        String prompt = aiClient.buildFreeUserPrompt(facts.variables(), facts.style(), facts.minLen(), facts.maxLen());
+        BigDecimal estimate = quota.estimateCost(prompt);
+
+        if (!quota.canSpend(estimate)) {
+            warnings.add("默认额度已用完，已使用内置模板生成；如需更多生成，请自行接入 API。");
+            return finishAi(fallbackDraft, facts, "free", warnings, true, s);
+        }
+
+        try {
+            AiGreetingClient.AiResult result = aiClient.createFree(prompt);
+            Validation validation = validate(result.message(), facts);
+            warnings.addAll(validation.warnings());
+            if (!validation.ok()) {
+                warnings.add("模型输出未通过校验。");
+                return finishAi(fallbackDraft, facts, "free", warnings, false, s);
+            }
+            quota.charge(job.getId(), "free", result.promptTokens(), result.cacheHitTokens(),
+                    result.completionTokens(), result.usageReported(), estimate, greetingProperties.getPromptVersion());
+            return new Greeting(result.message(), facts.direction(), facts.months(), facts.days(),
+                    ADVICE, "AI", "free", warnings, false);
+        } catch (Exception e) {
+            log.warn("AI 自由生成失败，回退模板：{}", e.getMessage());
+            warnings.add("AI 自由生成失败：" + e.getMessage());
+            return finishAi(fallbackDraft, facts, "free", warnings, false, s);
+        }
+    }
+
+    private Greeting generateWithAi(Job job, Facts facts, String templateId, String draft,
+                                    SettingsSnapshot s) {
         List<String> warnings = new ArrayList<>();
         String prompt = aiClient.buildUserPrompt(draft, facts.style(), facts.minLen(), facts.maxLen());
         BigDecimal estimate = quota.estimateCost(prompt);
 
         if (!quota.canSpend(estimate)) {
             warnings.add("默认额度已用完，已使用内置模板生成；如需更多生成，请自行接入 API。");
-            return fallback(draft, facts, templateId, warnings, true);
+            return finishAi(draft, facts, templateId, warnings, true, s);
         }
 
         try {
@@ -130,23 +177,29 @@ public class GreetingService {
             Validation validation = validate(result.message(), facts);
             warnings.addAll(validation.warnings());
             if (!validation.ok()) {
-                warnings.add("模型输出未通过校验，已使用内置模板生成。");
-                return fallback(draft, facts, templateId, warnings, false);
+                warnings.add("模型输出未通过校验。");
+                return finishAi(draft, facts, templateId, warnings, false, s);
             }
             quota.charge(job.getId(), templateId, result.promptTokens(), result.cacheHitTokens(),
                     result.completionTokens(), result.usageReported(), estimate, greetingProperties.getPromptVersion());
             return new Greeting(result.message(), facts.direction(), facts.months(), facts.days(),
                     ADVICE, "AI", templateId, warnings, false);
         } catch (Exception e) {
-            log.warn("AI 话术生成失败，回退模板：{}", e.getMessage());
-            warnings.add("AI 生成失败，已使用内置模板生成：" + e.getMessage());
-            return fallback(draft, facts, templateId, warnings, false);
+            log.warn("AI 话术生成失败：{}", e.getMessage());
+            warnings.add("AI 生成失败：" + e.getMessage());
+            return finishAi(draft, facts, templateId, warnings, false, s);
         }
     }
 
-    private Greeting fallback(String draft, Facts facts, String templateId,
-                              List<String> warnings, boolean quotaExceeded) {
-        return new Greeting(draft, facts.direction(), facts.months(), facts.days(),
+    /** 失败或额度不足时：按设置决定是否回退模板 */
+    private Greeting finishAi(String draft, Facts facts, String templateId,
+                              List<String> warnings, boolean quotaExceeded, SettingsSnapshot s) {
+        if (s.autoFallback()) {
+            warnings.add("已使用内置模板生成。");
+            return new Greeting(draft, facts.direction(), facts.months(), facts.days(),
+                    ADVICE, "AI", templateId, warnings, quotaExceeded);
+        }
+        return new Greeting("", facts.direction(), facts.months(), facts.days(),
                 ADVICE, "AI", templateId, warnings, quotaExceeded);
     }
 
@@ -176,7 +229,8 @@ public class GreetingService {
         return new Validation(true, warnings);
     }
 
-    private Facts buildFacts(Job job, CandidateProfile profileOverride, String styleOverride) {
+    private Facts buildFacts(Job job, CandidateProfile profileOverride, String styleOverride,
+                             String defaultTemplate) {
         CandidateProfile p = profileOverride != null
                 ? profileOverride
                 : profileRepository.findById(1L).orElse(null);
@@ -234,7 +288,10 @@ public class GreetingService {
         String startFromClause = StringUtils.hasText(startFrom) ? "，" + startFrom.trim() + "即可到岗" : "";
         String style = StringUtils.hasText(styleOverride)
                 ? styleOverride
-                : (p == null || !StringUtils.hasText(p.getStyle()) ? "concise" : p.getStyle());
+                : (p == null || !StringUtils.hasText(p.getStyle())
+                    ? ("concise".equalsIgnoreCase(defaultTemplate) || "formal".equalsIgnoreCase(defaultTemplate)
+                        ? defaultTemplate : "concise")
+                    : p.getStyle());
 
         int minLen = clamp(p == null ? 55 : p.getMinLen(), 20, 300);
         int maxLen = clamp(p == null ? 110 : p.getMaxLen(), minLen, 300);
@@ -255,6 +312,20 @@ public class GreetingService {
         variables.put("aiPart", aiPart);
         variables.put("company", nullToEmpty(job.getCompany()));
         variables.put("title", nullToEmpty(job.getTitle()));
+
+        // 自由生成模式使用的原始资料
+        variables.put("schoolFull", p == null ? school : firstNotBlank(p.getSchoolFull(), school));
+        variables.put("degree", p == null ? "本科" : firstNotBlank(p.getDegree(), "本科"));
+        variables.put("profileSkills", p == null ? "" : nullToEmpty(p.getSkills()));
+        variables.put("profileEvidence", p == null ? "" : nullToEmpty(p.getEvidence()));
+        variables.put("startFrom", startFrom == null ? "" : startFrom.trim());
+        variables.put("aiAgentOk", aiOk ? "true" : "false");
+        variables.put("jobSkills", nullToEmpty(job.getSkills()));
+        variables.put("jdText", truncate(nullToEmpty(job.getJdText()), 1000));
+        variables.put("rawLocation", firstNotBlank(job.getRawLocation(),
+                String.join("", job.getProvince() == null ? "" : job.getProvince(),
+                        job.getCity() == null ? "" : job.getCity(),
+                        job.getDistrict() == null ? "" : job.getDistrict())));
 
         return new Facts(style, direction, months, days, minLen, maxLen, variables);
     }
@@ -354,5 +425,9 @@ public class GreetingService {
 
     private String nullToEmpty(String s) {
         return s == null ? "" : s;
+    }
+
+    private String truncate(String s, int max) {
+        return s.length() <= max ? s : s.substring(0, max);
     }
 }

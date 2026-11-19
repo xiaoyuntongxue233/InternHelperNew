@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>设置 · 实习投递助手</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f5f7fa; color: #222; }
+    header { background: #1f6f63; color: #fff; padding: 16px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    header h1 { margin: 0; font-size: 20px; }
+    header a { color: #d8f0ea; font-size: 13px; text-decoration: none; border: 1px solid #4e8f85; padding: 5px 10px; border-radius: 6px; }
+    header a:hover { background: #2b8073; }
+    header .save { margin-left: auto; }
+    main { padding: 18px 24px 60px; max-width: 1000px; margin: 0 auto; display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    .card { background: #fff; border-radius: 8px; padding: 18px 20px; margin-bottom: 16px; }
+    .card h2 { margin: 0 0 14px; font-size: 15px; color: #1f6f63; }
+    .row { display: grid; grid-template-columns: 130px 1fr; gap: 10px; align-items: center; margin-bottom: 10px; }
+    .row label { font-size: 13px; color: #556; }
+    input[type=text], input[type=password], input[type=number], select {
+      width: 100%; font-size: 14px; padding: 7px 10px; border: 1px solid #cfd6dd; border-radius: 6px; background: #fff; font-family: inherit;
+    }
+    button { font-size: 14px; padding: 7px 14px; border: 1px solid #cfd6dd; border-radius: 6px; background: #fff; cursor: pointer; }
+    button.primary { background: #1f6f63; color: #fff; border-color: #1f6f63; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .hint { font-size: 12px; color: #889; margin-top: 3px; }
+    .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #e8f3f0; color: #1f6f63; }
+    .bar { height: 10px; background: #eef1f4; border-radius: 6px; overflow: hidden; margin: 8px 0 4px; }
+    .bar > i { display: block; height: 100%; background: #1f6f63; }
+    .kv { font-size: 13px; display: flex; justify-content: space-between; margin: 4px 0; }
+    .kv b { font-weight: 500; }
+    .msg { font-size: 13px; margin-top: 10px; line-height: 1.6; }
+    .msg.ok { color: #1f6f63; }
+    .msg.err { color: #c0392b; }
+    .advanced { margin-top: 14px; border-top: 1px solid #eef1f4; padding-top: 12px; }
+    .toast { position: fixed; right: 20px; bottom: 20px; background: #1f6f63; color: #fff; padding: 10px 16px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity .2s; }
+    .toast.show { opacity: 1; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eef1f4; }
+    th { background: #f0f4f6; font-weight: 500; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>设置</h1>
+  <a href="/">← 岗位列表</a>
+  <a href="/profile.html">个人资料</a>
+  <button class="primary save" onclick="save()" id="btnSave">保存设置</button>
+</header>
+
+<main>
+  <div>
+    <div class="card">
+      <h2>生成引擎</h2>
+      <div class="row"><label>生成模式</label>
+        <select id="engine">
+          <option value="RULE">RULE · 只用内置模板</option>
+          <option value="AI">AI · 模板草稿 + 模型润色</option>
+          <option value="HYBRID">HYBRID · AI 润色，失败回退</option>
+        </select>
+      </div>
+      <div class="row"><label>默认模板</label>
+        <select id="template">
+          <option value="concise">简洁</option>
+          <option value="formal">正式</option>
+          <option value="free">AI自由生成（无模板）</option>
+        </select>
+        <div></div>
+        <div class="hint">个人资料页若已选句式，以个人资料为准；这里只作为未设置时的默认值。“AI自由生成”下 AI 直接读个人资料创作，需开启 AI / HYBRID 模式。</div>
+      </div>
+      <div class="row"><label>AI 自动回退</label>
+        <select id="autoFallback">
+          <option value="true">开启 · 失败时用模板生成</option>
+          <option value="false">关闭 · 失败时不返回话术</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>模型连接</h2>
+      <div class="row"><label>Key 来源</label>
+        <select id="keySource">
+          <option value="PLATFORM">平台默认（计入 0.1 元额度）</option>
+          <option value="BYO">用户自带（不计平台额度）</option>
+        </select>
+      </div>
+      <div class="row"><label>Base URL</label><input type="text" id="baseUrl" placeholder="https://api.deepseek.com"/></div>
+      <div class="row"><label>模型名</label><input type="text" id="model" placeholder="deepseek-flash"/></div>
+      <div class="row"><label>自带 API Key</label>
+        <div>
+          <input type="password" id="apiKey" placeholder="输入新的 Key 才会覆盖，留空保持原值"/>
+          <div class="hint" id="keyHint">—</div>
+        </div>
+      </div>
+      <div class="row"><label>超时(ms)</label><input type="number" id="timeoutMs" min="1000" max="120000" step="1000"/></div>
+      <div class="row"><label>最大输出</label><input type="number" id="maxTokens" min="50" max="4000" step="50"/></div>
+      <div class="row"><label></label>
+        <div>
+          <button onclick="testConnection()" id="btnTest">测试连接</button>
+          <div class="msg" id="testMsg"></div>
+        </div>
+      </div>
+
+      <div class="advanced">
+        <button onclick="toggleAdvanced()" id="btnAdvanced">展开单价设置 ▾</button>
+        <div id="advancedBox" style="display:none; margin-top:12px">
+          <div class="row"><label>输入(通用)</label><input type="text" id="priceInputPer1m"/></div>
+          <div class="row"><label>输入·缓存命中</label><input type="text" id="priceInputCacheHitPer1m"/></div>
+          <div class="row"><label>输入·未命中</label><input type="text" id="priceInputCacheMissPer1m"/></div>
+          <div class="row"><label>输出</label><input type="text" id="priceOutputPer1m"/></div>
+          <div class="hint" style="margin-left:130px">单位：元 / 1M tokens。0 表示未配置，走兼容兜底。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>额度</h2>
+      <div class="bar"><i id="quotaBar" style="width:0%"></i></div>
+      <div class="kv"><span>模式</span><b id="quotaMode">—</b></div>
+      <div class="kv"><span>已用</span><b id="usedCny">—</b></div>
+      <div class="kv"><span>剩余</span><b id="remainingCny">—</b></div>
+      <div class="kv"><span>总额度</span><b id="budgetCny">—</b></div>
+      <div class="hint" style="margin-top:8px">总额度由平台规则决定，此处只读。自带 Key 不扣平台额度。</div>
+    </div>
+
+    <div class="card">
+      <h2>最近调用</h2>
+      <div id="usageBox" style="font-size:12px;color:#889">加载中…</div>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const PRICE_FIELDS = ['priceInputPer1m','priceInputCacheHitPer1m','priceInputCacheMissPer1m','priceOutputPer1m'];
+  function $(id) { return document.getElementById(id); }
+
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 1800);
+  }
+
+  async function api(path, options) {
+    const res = await fetch(path, options);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || ('请求失败 ' + res.status));
+    return data;
+  }
+
+  function fillSettings(s) {
+    $('engine').value = s.engine || 'RULE';
+    $('template').value = s.template || 'concise';
+    $('autoFallback').value = String(s.autoFallback) === 'false' ? 'false' : 'true';
+    $('keySource').value = s.keySource || 'PLATFORM';
+    $('baseUrl').value = s.baseUrl || '';
+    $('model').value = s.model || '';
+    $('timeoutMs').value = s.timeoutMs || 8000;
+    $('maxTokens').value = s.maxTokens || 300;
+    PRICE_FIELDS.forEach(f => { $(f).value = s[f] || '0'; });
+    $('keyHint').textContent = s.keyConfigured
+      ? '当前 Key：' + (s.apiKeyMasked || '已配置（脱敏）') + '（留空不覆盖）'
+      : '尚未配置 Key';
+  }
+
+  function fillQuota(q) {
+    $('quotaMode').textContent = q.mode || '—';
+    $('usedCny').textContent = (q.usedCny || '0') + ' 元';
+    $('remainingCny').textContent = (q.remainingCny || '0') + ' 元';
+    $('budgetCny').textContent = (q.budgetCny || '0') + ' 元';
+    $('quotaBar').style.width = Math.min(100, Math.max(0, Number(q.percentUsed) || 0)) + '%';
+  }
+
+  async function load() {
+    try {
+      const d = await api('/api/settings');
+      fillSettings(d.settings);
+      fillQuota(d.quota);
+      await loadUsage();
+    } catch (e) { toast('读取失败：' + e.message); }
+  }
+
+  async function loadUsage() {
+    try {
+      const list = await api('/api/settings/usage');
+      if (!list.length) { $('usageBox').textContent = '暂无调用记录'; return; }
+      $('usageBox').innerHTML = '<table><thead><tr><th>时间</th><th>模式</th><th>金额</th></tr></thead><tbody>'
+        + list.map(u => '<tr><td>' + esc(String(u.createdAt || '').replace('T',' ').slice(0,16))
+          + '</td><td>' + esc(u.mode) + '</td><td>' + esc(u.costCny) + '</td></tr>').join('')
+        + '</tbody></table>';
+    } catch (e) { $('usageBox').textContent = '读取失败'; }
+  }
+
+  function collect() {
+    const patch = {
+      engine: $('engine').value,
+      template: $('template').value,
+      autoFallback: $('autoFallback').value,
+      keySource: $('keySource').value,
+      baseUrl: $('baseUrl').value.trim(),
+      model: $('model').value.trim(),
+      timeoutMs: $('timeoutMs').value,
+      maxTokens: $('maxTokens').value
+    };
+    PRICE_FIELDS.forEach(f => { patch[f] = $(f).value.trim() || '0'; });
+    const key = $('apiKey').value.trim();
+    if (key) patch['ai.byo-api-key'] = key;
+    return patch;
+  }
+
+  async function save() {
+    const btn = $('btnSave');
+    btn.disabled = true;
+    try {
+      const d = await api('/api/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(collect())
+      });
+      fillSettings(d.settings);
+      fillQuota(d.quota);
+      $('apiKey').value = '';
+      toast('已保存，立即生效');
+    } catch (e) { toast('保存失败：' + e.message); }
+    finally { btn.disabled = false; }
+  }
+
+  async function testConnection() {
+    const btn = $('btnTest');
+    btn.disabled = true;
+    const msg = $('testMsg');
+    msg.className = 'msg';
+    msg.textContent = '测试中…';
+    try {
+      const body = {
+        baseUrl: $('baseUrl').value.trim(),
+        model: $('model').value.trim(),
+        apiKey: $('apiKey').value.trim(),
+        timeoutMs: $('timeoutMs').value
+      };
+      const r = await api('/api/settings/test-connection', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      msg.className = 'msg ' + (r.success ? 'ok' : 'err');
+      msg.textContent = r.message;
+    } catch (e) {
+      msg.className = 'msg err';
+      msg.textContent = '测试失败：' + e.message;
+    } finally { btn.disabled = false; }
+  }
+
+  function toggleAdvanced() {
+    const box = $('advancedBox');
+    const open = box.style.display === 'none';
+    box.style.display = open ? 'block' : 'none';
+    $('btnAdvanced').textContent = open ? '收起单价设置 ▴' : '展开单价设置 ▾';
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  load();
+</script>
+</body>
+</html>
