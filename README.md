@@ -236,7 +236,7 @@ Controller 只做参数接收和组装，业务在 Service，数据访问在 Rep
 ### v0.7.2（2026-11-18）
 
 - 移除批量投递：删除 `DeliverService` / `DeliverController`，前端去掉「开始投递」按钮
-- 归档 7 个脚本到 `tools/boss-greeting/deprecated/`，附 README 说明反调试证据
+- 归档 7 个脚本到 `（历史目录，已移除）`，附 README 说明反调试证据
 - 话术面板改为独占一行（`colspan` 全表宽），行高收紧、字号 15px、复制/收起横排
 
 ### v0.7.1（2026-11-18）
