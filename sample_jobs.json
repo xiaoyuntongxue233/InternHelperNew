@@ -1,0 +1,49 @@
+{
+  "jobs": [
+    {
+      "company": "示例科技A",
+      "title": "JAVA开发实习生",
+      "city": "深圳",
+      "salary": "200-400元/天",
+      "url": "https://example.com/job/1",
+      "skills": "SpringBoot、MySQL、Redis",
+      "jdText": "5天/周、6个月、本科"
+    },
+    {
+      "company": "示例科技B",
+      "title": "java开发实习生",
+      "city": "广州越秀区",
+      "salary": "150-200元/天",
+      "url": "https://example.com/job/2",
+      "skills": "SpringCloud、微服务",
+      "jdText": "4天/周、3个月"
+    },
+    {
+      "company": "示例科技C",
+      "title": "AI 应用开发后端实习生（Java/Go 方向）",
+      "city": "北京海淀区",
+      "salary": "300-350元/天",
+      "url": "https://example.com/job/3",
+      "skills": "Java、大模型",
+      "jdText": "5天/周、4个月"
+    },
+    {
+      "company": "示例科技D",
+      "title": "测试开发实习生",
+      "city": "杭州",
+      "salary": "200元/天",
+      "url": "https://example.com/job/4",
+      "skills": "pytest、接口测试",
+      "jdText": "3天/周、3个月"
+    },
+    {
+      "company": "示例科技E",
+      "title": "数据开发实习生",
+      "city": "上海",
+      "salary": "250元/天",
+      "url": "https://example.com/job/5",
+      "skills": "Spark、Hive",
+      "jdText": "7天/周、12个月"
+    }
+  ]
+}

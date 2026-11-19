@@ -1,0 +1,22 @@
+target/
+*.log
+*.err
+.idea/
+*.iml
+.DS_Store
+ui.png
+ui2.png
+*.local.yml
+
+# 本地投放目录与调试脚本
+import-drop/
+apitest.py
+ui3.png
+ui_add.png
+sorttest.py
+apitest.py
+gen_backfill.py
+backfill.sql
+ui4.png
+ui_edit.png
+collect_salary.mjs

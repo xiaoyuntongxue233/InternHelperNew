@@ -1,0 +1,18 @@
+{
+  "name": "张三",
+  "school": "XX大学",
+  "school_full": "XX大学（XX）",
+  "major": "XX专业",
+  "grade": "2028 届",
+  "availability": "1 月中旬起每周 5 天，能连做 3 个月以上",
+  "evidence": {
+    "java": "独立做过一个 RBAC 三级权限 + 分层架构的 Java 项目，社团正在用",
+    "spring": "SpringBoot 用过 IoC、REST 接口和统一异常处理",
+    "mysql": "MySQL 建表、索引、常用 SQL 都自己写",
+    "algorithm": "单链表、队列、归并排序都是手写实现，能讲清复杂度取舍",
+    "backend": "做过权限拦截、统一异常处理和输入校验这套后端基本盘"
+  },
+  "tone": "直接、具体、不客套",
+  "max_len": 110,
+  "min_len": 55
+}

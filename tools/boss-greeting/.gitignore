@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------
+# 这个仓库是「脱敏版」。下面这些东西一律不进版本库。
+# ---------------------------------------------------------------
+
+# ---- 登录态 / 浏览器数据（含 Cookie、保存的密码）----
+.boss-profile/
+.edge-profile/
+backup_*/
+*Cookies*
+*Login Data*
+Local State
+
+# ---- 运行产物（含公司名、岗位名、话术原文）----
+out/
+out_*/
+verify_new.txt
+send_missing_result.txt
+*.log
+
+# ---- 个人投递数据（公司名 + 岗位 URL，属于个人求职记录）----
+queue*.json
+send_plan_missing.json
+plan_test.json
+*_jobs.json
+preview*.txt
+gd_preview.txt
+sz_preview.txt
+
+# ---- 本地真实身份信息 ----
+# my_profile.json 是脱敏模板，可以进库；
+# 真实版本请放在 my_profile.local.json，这个文件不进库。
+my_profile.local.json
+
+# ---- 系统 / 编辑器 ----
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
