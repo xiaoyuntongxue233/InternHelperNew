@@ -80,6 +80,11 @@ public class JobController {
         map.put("months", g.months());
         map.put("days", g.days());
         map.put("length", g.message().length());
+        map.put("advice", g.advice());
+        map.put("engine", g.engine());
+        map.put("templateId", g.templateId());
+        map.put("warnings", g.warnings());
+        map.put("quotaExceeded", g.quotaExceeded());
         return map;
     }
 

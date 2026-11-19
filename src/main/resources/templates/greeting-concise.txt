@@ -1,0 +1,1 @@
+您好，我是{{school}}{{grade}}{{degreeLabel}}{{majorClause}}。本人{{skillClause}}{{aiPart}}本人可连续实习至少{{months}}个月，每周{{days}}天{{startFromClause}}。希望收到您的回复。

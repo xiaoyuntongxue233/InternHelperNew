@@ -1,0 +1,1 @@
+您好！我是{{school}}{{grade}}{{degreeLabel}}{{majorClause}}。本人{{skillClause}}{{aiPart}}目前可保证连续实习{{months}}个月、每周出勤{{days}}天{{startFromClause}}。期待您的回复，感谢！

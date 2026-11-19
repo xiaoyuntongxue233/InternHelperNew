@@ -1,36 +1,49 @@
 package com.zhou.internhelper.service;
 
 import com.zhou.internhelper.config.CandidateProperties;
+import com.zhou.internhelper.config.GreetingProperties;
 import com.zhou.internhelper.entity.CandidateProfile;
 import com.zhou.internhelper.entity.GreetingRule;
 import com.zhou.internhelper.entity.Job;
 import com.zhou.internhelper.repository.CandidateProfileRepository;
 import com.zhou.internhelper.repository.GreetingRuleRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 话术生成器
+ * 话术生成器。
  *
- * 输入：岗位（决定技能方向、岗位要求的时长/出勤）+ 个人资料（决定学校、专业、可接受上限、句式风格）
- * 规则：
- * 1. 技能句按岗位名/技术栈/要求原文关键词匹配（规则存在数据库里，按 priority 升序）
- * 2. 实习月数、每周天数 = 岗位要求 ∩ 个人能力，两条硬上限：≤6 个月、≤5 天
- * 3. 两套句式：concise（简洁）/ formal（正式）
+ * RULE：按内置模板确定性渲染。
+ * AI / HYBRID：先渲染模板草稿，再交给模型润色；模型失败、超时、校验不通过或额度不足时回退到草稿。
  */
 @Service
 public class GreetingService {
 
-    public static final String AI_PART = "，现可熟悉使用AI agent相关软件。";
-    public static final String TAIL_TEMPLATE = "本人可连续实习至少%d个月，每周%d天。希望收到您的回复。";
-    public static final String DEFAULT_CLAUSE = "熟悉Java，有Springboot，MySQL相关经验";
+    private static final Logger log = LoggerFactory.getLogger(GreetingService.class);
 
-    private static final int ABS_MAX_MONTHS = 6;
-    private static final int ABS_MAX_DAYS = 5;
+    public static final String ADVICE = "实习最好不超过6个月，每周最好不超过6天。";
+    public static final String AI_PART = "，也熟悉AI agent相关工具。";
+    public static final String DEFAULT_CLAUSE = "熟悉Java，有SpringBoot、MySQL相关经验";
+
+    /** 硬上限：可以超过建议值，但后端强制裁剪 */
+    public static final int ABS_MAX_MONTHS = 12;
+    public static final int ABS_MAX_DAYS = 7;
+
+    /** 建议值：只展示，不写入对外话术 */
+    public static final int SOFT_MAX_MONTHS = 6;
+    public static final int SOFT_MAX_DAYS = 6;
+
     private static final int DEFAULT_MONTHS = 3;
     private static final int DEFAULT_DAYS = 5;
     private static final int MIN_MONTHS = 2;
@@ -42,20 +55,46 @@ public class GreetingService {
     private final GreetingRuleRepository ruleRepository;
     private final CandidateProfileRepository profileRepository;
     private final CandidateProperties candidate;
+    private final GreetingTemplateService templateService;
+    private final AiGreetingClient aiClient;
+    private final AiQuotaService quota;
+    private final GreetingProperties greetingProperties;
 
-    /** 规则正则只编译一次，避免每条岗位重复编译 */
-    private final Map<Long, Pattern> patternCache = new ConcurrentHashMap<>();
+    /** 规则正则缓存：key 为规则 id，value 含原始正则；数据库里的正则变了会自动失效 */
+    private final ConcurrentHashMap<Long, CachedPattern> patternCache = new ConcurrentHashMap<>();
 
     public GreetingService(GreetingRuleRepository ruleRepository,
                            CandidateProfileRepository profileRepository,
-                           CandidateProperties candidate) {
+                           CandidateProperties candidate,
+                           GreetingTemplateService templateService,
+                           AiGreetingClient aiClient,
+                           AiQuotaService quota,
+                           GreetingProperties greetingProperties) {
         this.ruleRepository = ruleRepository;
         this.profileRepository = profileRepository;
         this.candidate = candidate;
+        this.templateService = templateService;
+        this.aiClient = aiClient;
+        this.quota = quota;
+        this.greetingProperties = greetingProperties;
     }
 
-    /** 生成结果：话术 + 匹配到的方向 + 时长 */
-    public record Greeting(String message, String direction, int months, int days) {
+    public record Greeting(String message, String direction, int months, int days,
+                           String advice, String engine, String templateId,
+                           List<String> warnings, boolean quotaExceeded) {
+        public Greeting(String message, String direction, int months, int days) {
+            this(message, direction, months, days, ADVICE, "RULE", null, List.of(), false);
+        }
+    }
+
+    private record Facts(String style, String direction, int months, int days,
+                         int minLen, int maxLen, Map<String, String> variables) {
+    }
+
+    private record Validation(boolean ok, List<String> warnings) {
+    }
+
+    private record CachedPattern(String source, Pattern pattern) {
     }
 
     /** 兼容旧调用：自动读库里的个人资料 */
@@ -63,11 +102,81 @@ public class GreetingService {
         return generate(job, null, null);
     }
 
-    /**
-     * @param profileOverride 传入则用它，不传则读库里的单行资料
-     * @param styleOverride   传入则覆盖资料里的风格（concise / formal）
-     */
     public Greeting generate(Job job, CandidateProfile profileOverride, String styleOverride) {
+        Facts facts = buildFacts(job, profileOverride, styleOverride);
+        GreetingTemplateService.Rendered rendered = templateService.render(facts.style(), facts.variables());
+        String draft = rendered.text();
+
+        String engine = greetingProperties.getEngine() == null ? "RULE" : greetingProperties.getEngine();
+        if (!"AI".equalsIgnoreCase(engine) && !"HYBRID".equalsIgnoreCase(engine)) {
+            return new Greeting(draft, facts.direction(), facts.months(), facts.days(),
+                    ADVICE, "RULE", rendered.templateId(), List.of(), false);
+        }
+        return generateWithAi(job, facts, rendered.templateId(), draft);
+    }
+
+    private Greeting generateWithAi(Job job, Facts facts, String templateId, String draft) {
+        List<String> warnings = new ArrayList<>();
+        String prompt = aiClient.buildUserPrompt(draft, facts.style(), facts.minLen(), facts.maxLen());
+        BigDecimal estimate = quota.estimateCost(prompt);
+
+        if (!quota.canSpend(estimate)) {
+            warnings.add("默认额度已用完，已使用内置模板生成；如需更多生成，请自行接入 API。");
+            return fallback(draft, facts, templateId, warnings, true);
+        }
+
+        try {
+            AiGreetingClient.AiResult result = aiClient.polish(prompt);
+            Validation validation = validate(result.message(), facts);
+            warnings.addAll(validation.warnings());
+            if (!validation.ok()) {
+                warnings.add("模型输出未通过校验，已使用内置模板生成。");
+                return fallback(draft, facts, templateId, warnings, false);
+            }
+            quota.charge(job.getId(), templateId, result.promptTokens(), result.cacheHitTokens(),
+                    result.completionTokens(), result.usageReported(), estimate, greetingProperties.getPromptVersion());
+            return new Greeting(result.message(), facts.direction(), facts.months(), facts.days(),
+                    ADVICE, "AI", templateId, warnings, false);
+        } catch (Exception e) {
+            log.warn("AI 话术生成失败，回退模板：{}", e.getMessage());
+            warnings.add("AI 生成失败，已使用内置模板生成：" + e.getMessage());
+            return fallback(draft, facts, templateId, warnings, false);
+        }
+    }
+
+    private Greeting fallback(String draft, Facts facts, String templateId,
+                              List<String> warnings, boolean quotaExceeded) {
+        return new Greeting(draft, facts.direction(), facts.months(), facts.days(),
+                ADVICE, "AI", templateId, warnings, quotaExceeded);
+    }
+
+    private Validation validate(String message, Facts facts) {
+        if (!StringUtils.hasText(message)) {
+            return new Validation(false, List.of("模型输出为空"));
+        }
+        String text = message.trim();
+        int len = text.length();
+        if (len < facts.minLen() * 0.8 || len > facts.maxLen() * 1.2) {
+            return new Validation(false, List.of("输出字数明显偏离目标区间：" + len + " 字"));
+        }
+        List<String> warnings = new ArrayList<>();
+        if (len < facts.minLen() || len > facts.maxLen()) {
+            warnings.add("字数略超目标区间：" + len + " 字");
+        }
+        Map<String, String> v = facts.variables();
+        if (!containsAny(text, v.get("school"), v.get("schoolShort"))) {
+            return new Validation(false, List.of("输出中缺少学校信息"));
+        }
+        if (!containsAny(text, v.get("degreeLabel"))) {
+            return new Validation(false, List.of("输出中缺少学历信息"));
+        }
+        if (!text.contains(String.valueOf(facts.months())) || !text.contains(String.valueOf(facts.days()))) {
+            return new Validation(false, List.of("输出中的实习月数或出勤天数与事实不一致"));
+        }
+        return new Validation(true, warnings);
+    }
+
+    private Facts buildFacts(Job job, CandidateProfile profileOverride, String styleOverride) {
         CandidateProfile p = profileOverride != null
                 ? profileOverride
                 : profileRepository.findById(1L).orElse(null);
@@ -80,66 +189,108 @@ public class GreetingService {
         String clause = DEFAULT_CLAUSE;
         String direction = "通用 Java 方向";
         for (GreetingRule rule : ruleRepository.findByEnabledTrueOrderByPriorityAsc()) {
-            Pattern pattern = patternCache.computeIfAbsent(rule.getId(),
-                    id -> Pattern.compile(rule.getPattern(), Pattern.CASE_INSENSITIVE));
+            Pattern pattern;
+            try {
+                pattern = cachedPattern(rule);
+            } catch (Exception e) {
+                log.warn("忽略非法话术规则 {}: {}", rule.getId(), e.getMessage());
+                continue;
+            }
             if (pattern.matcher(blob).find()) {
-                clause = rule.getSkillClause();
+                clause = rule.getSkillClause() == null ? DEFAULT_CLAUSE : rule.getSkillClause();
                 direction = rule.getDirection() == null ? "未命名方向" : rule.getDirection();
                 break;
             }
         }
 
+        String evidence = matchEvidence(p, blob + " " + nullToEmpty(p == null ? null : p.getSkills()));
+        if (StringUtils.hasText(evidence)) {
+            clause = clause + "，" + evidence;
+        }
+
         int jobMonths = parseMonths(blob);
         int jobDays = parseDays(blob);
-
-        // 岗位要求 ∩ 个人能力；两条硬上限永远生效
         int months = Math.min(jobMonths, ABS_MAX_MONTHS);
         int days = Math.min(jobDays, ABS_MAX_DAYS);
         if (p != null) {
             months = Math.min(months, clamp(p.getMaxMonths(), 1, ABS_MAX_MONTHS));
-            months = Math.max(months, clamp(p.getMinMonths(), 1, months));
+            months = Math.max(months, clamp(p.getMinMonths(), 1, ABS_MAX_MONTHS));
+            months = Math.min(months, ABS_MAX_MONTHS);
             days = Math.min(days, clamp(p.getDaysPerWeek(), 1, ABS_MAX_DAYS));
         }
 
-        String school = p != null && notBlank(p.getSchoolFull())
-                ? p.getSchoolFull() : candidate.getSchool();
-        String grade = p != null && notBlank(p.getGrade())
-                ? p.getGrade() : candidate.getGrade();
+        String school = firstNotBlank(
+                p == null ? null : p.getSchoolFull(),
+                p == null ? null : p.getSchoolShort(),
+                candidate.getSchool());
+        String grade = firstNotBlank(p == null ? null : p.getGrade(), candidate.getGrade());
+        String degreeLabel = degreeLabel(p == null ? null : p.getDegree());
         String major = p == null ? null : p.getMajor();
+        String majorClause = StringUtils.hasText(major) ? "，" + major.trim() + "专业" : "";
+        String nameClause = p != null && StringUtils.hasText(p.getName()) ? "，" + p.getName().trim() : "";
         boolean aiOk = p == null || !Boolean.FALSE.equals(p.getAiAgentOk());
-        String startFrom = p == null ? null : p.getStartFrom();
-        String style = styleOverride != null && !styleOverride.isBlank()
-                ? styleOverride : (p == null || p.getStyle() == null ? "concise" : p.getStyle());
-
         String aiPart = aiOk ? AI_PART : "。";
-        String message;
+        String startFrom = p == null ? null : p.getStartFrom();
+        String startFromClause = StringUtils.hasText(startFrom) ? "，" + startFrom.trim() + "即可到岗" : "";
+        String style = StringUtils.hasText(styleOverride)
+                ? styleOverride
+                : (p == null || !StringUtils.hasText(p.getStyle()) ? "concise" : p.getStyle());
 
-        if ("formal".equalsIgnoreCase(style)) {
-            StringBuilder sb = new StringBuilder();
-            sb.append("您好！我是").append(school).append(grade).append("本科生");
-            if (notBlank(major)) sb.append("，").append(major).append("专业");
-            sb.append("。本人").append(clause).append(aiPart);
-            if (notBlank(startFrom)) {
-                sb.append("目前可").append(startFrom).append("起到岗，可保证连续实习")
-                        .append(months).append("个月、每周出勤").append(days).append("天。");
-            } else {
-                sb.append("目前可保证连续实习").append(months).append("个月、每周出勤")
-                        .append(days).append("天。");
+        int minLen = clamp(p == null ? 55 : p.getMinLen(), 20, 300);
+        int maxLen = clamp(p == null ? 110 : p.getMaxLen(), minLen, 300);
+
+        Map<String, String> variables = new LinkedHashMap<>();
+        variables.put("school", school);
+        variables.put("schoolShort", firstNotBlank(p == null ? null : p.getSchoolShort(), school));
+        variables.put("grade", grade);
+        variables.put("degreeLabel", degreeLabel);
+        variables.put("major", major == null ? "" : major.trim());
+        variables.put("majorClause", majorClause);
+        variables.put("nameClause", nameClause);
+        variables.put("skillClause", clause);
+        variables.put("direction", direction);
+        variables.put("months", String.valueOf(months));
+        variables.put("days", String.valueOf(days));
+        variables.put("startFromClause", startFromClause);
+        variables.put("aiPart", aiPart);
+        variables.put("company", nullToEmpty(job.getCompany()));
+        variables.put("title", nullToEmpty(job.getTitle()));
+
+        return new Facts(style, direction, months, days, minLen, maxLen, variables);
+    }
+
+    private String matchEvidence(CandidateProfile p, String blob) {
+        if (p == null || !StringUtils.hasText(p.getEvidence())) {
+            return "";
+        }
+        String lower = blob.toLowerCase();
+        StringBuilder sb = new StringBuilder();
+        for (String part : p.getEvidence().split("[;；]")) {
+            int idx = part.indexOf('=');
+            if (idx <= 0) {
+                continue;
             }
-            sb.append("期待您的回复，感谢！");
-            message = sb.toString();
-        } else {
-            String head = "您好，我是" + school + grade + "本科生，本人";
-            if (notBlank(startFrom)) {
-                message = head + clause + aiPart
-                        + String.format("本人可连续实习至少%d个月，每周%d天，%s即可到岗。希望收到您的回复。",
-                        months, days, startFrom);
-            } else {
-                message = head + clause + aiPart + String.format(TAIL_TEMPLATE, months, days);
+            String key = part.substring(0, idx).trim();
+            String sentence = part.substring(idx + 1).trim();
+            if (!key.isEmpty() && lower.contains(key.toLowerCase())) {
+                if (sb.length() > 0) {
+                    sb.append("，");
+                }
+                sb.append(sentence);
             }
         }
+        return sb.toString();
+    }
 
-        return new Greeting(message, direction, months, days);
+    private Pattern cachedPattern(GreetingRule rule) {
+        String source = rule.getPattern() == null ? "" : rule.getPattern();
+        CachedPattern cached = patternCache.compute(rule.getId(), (id, old) -> {
+            if (old != null && old.source().equals(source)) {
+                return old;
+            }
+            return new CachedPattern(source, Pattern.compile(source, Pattern.CASE_INSENSITIVE));
+        });
+        return cached.pattern();
     }
 
     private int parseDays(String text) {
@@ -172,8 +323,33 @@ public class GreetingService {
         return x;
     }
 
-    private static boolean notBlank(String s) {
-        return s != null && !s.isBlank();
+    private String degreeLabel(String degree) {
+        String d = StringUtils.hasText(degree) ? degree.trim() : "本科";
+        return d.endsWith("生") ? d : d + "生";
+    }
+
+    private String firstNotBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String v : values) {
+            if (StringUtils.hasText(v)) {
+                return v.trim();
+            }
+        }
+        return "";
+    }
+
+    private boolean containsAny(String text, String... candidates) {
+        if (candidates == null) {
+            return false;
+        }
+        for (String c : candidates) {
+            if (StringUtils.hasText(c) && text.contains(c)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String nullToEmpty(String s) {

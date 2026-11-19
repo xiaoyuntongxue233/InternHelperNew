@@ -64,11 +64,12 @@
     </div>
 
     <h2 style="margin-top:18px">实习时长与出勤</h2>
-    <div class="row"><label>最少月数</label><input type="number" id="minMonths" min="1" max="6"/></div>
-    <div class="row"><label>最多月数</label><input type="number" id="maxMonths" min="1" max="6"/></div>
-    <div class="row"><label>每周天数</label><input type="number" id="daysPerWeek" min="1" max="5"/></div>
+    <div class="row"><label>最少月数</label><input type="number" id="minMonths" min="1" max="12"/></div>
+    <div class="row"><label>最多月数</label><input type="number" id="maxMonths" min="1" max="12"/></div>
+    <div class="row"><label>每周天数</label><input type="number" id="daysPerWeek" min="1" max="7"/></div>
     <div class="row"><label>可开始时间</label><input type="text" id="startFrom" placeholder="如：1 月中旬（可留空）"/></div>
-    <div class="hint" style="margin-left:120px">硬约束：每周 ≤ 5 天、实习 ≤ 6 个月，保存时后端会自动收敛。</div>
+    <div class="hint" style="margin-left:120px">硬约束：实习 ≤ 12 个月、每周 ≤ 7 天；保存时后端会自动收敛。</div>
+    <div class="hint" style="margin-left:120px">建议：实习最好不超过6个月，每周最好不超过6天。</div>
 
     <h2 style="margin-top:18px">风格</h2>
     <div class="row">
@@ -134,33 +135,30 @@
     const p = readForm();
     const school = notBlank(p.schoolFull) ? p.schoolFull : (notBlank(p.schoolShort) ? p.schoolShort : '某大学');
     const grade = notBlank(p.grade) ? p.grade : '2028届';
-    const months = Math.min(Number(p.maxMonths) || 6, 6);
-    const days = Math.min(Number(p.daysPerWeek) || 5, 5);
-    const clause = '熟悉Java，有Springboot、MySQL相关经验';
-    const ai = p.aiAgentOk ? '，现可熟悉使用AI agent相关软件。' : '。';
-    const start = notBlank(p.startFrom);
+    const degreeRaw = notBlank(p.degree) ? p.degree.trim() : '本科';
+    const degreeLabel = degreeRaw.endsWith('生') ? degreeRaw : degreeRaw + '生';
+    const majorClause = notBlank(p.major) ? '，' + p.major.trim() + '专业' : '';
+    const startClause = notBlank(p.startFrom) ? '，' + p.startFrom.trim() + '即可到岗' : '';
+    const months = Math.min(Number(p.maxMonths) || 12, 12);
+    const days = Math.min(Number(p.daysPerWeek) || 7, 7);
+    const clause = '熟悉Java，有SpringBoot、MySQL相关经验';
+    const ai = p.aiAgentOk ? '，也熟悉AI agent相关工具。' : '。';
 
     let msg;
     if (p.style === 'formal') {
-      msg = '您好！我是' + school + grade + '本科生'
-        + (notBlank(p.major) ? '，' + p.major + '专业' : '')
-        + '。本人' + clause + ai
-        + (start
-            ? '目前可' + p.startFrom + '起到岗，可保证连续实习' + months + '个月、每周出勤' + days + '天。'
-            : '目前可保证连续实习' + months + '个月、每周出勤' + days + '天。')
-        + '期待您的回复，感谢！';
+      msg = '您好！我是' + school + grade + degreeLabel + majorClause + '。本人' + clause + ai
+        + '目前可保证连续实习' + months + '个月、每周出勤' + days + '天' + startClause + '。期待您的回复，感谢！';
     } else {
-      msg = '您好，我是' + school + grade + '本科生，本人' + clause + ai
-        + (start
-            ? '本人可连续实习至少' + months + '个月，每周' + days + '天，' + p.startFrom + '即可到岗。希望收到您的回复。'
-            : '本人可连续实习至少' + months + '个月，每周' + days + '天。希望收到您的回复。');
+      msg = '您好，我是' + school + grade + degreeLabel + majorClause + '。本人' + clause + ai
+        + '本人可连续实习至少' + months + '个月，每周' + days + '天' + startClause + '。希望收到您的回复。';
     }
     $('preview').textContent = msg;
 
     const len = msg.length;
     const lo = Number(p.minLen) || 0, hi = Number(p.maxLen) || 999;
     const warn = (len < lo || len > hi) ? `　⚠ 目标 ${lo}–${hi} 字` : '　✓ 在目标区间内';
-    $('lenInfo').textContent = `当前 ${len} 字` + warn;
+    $('lenInfo').textContent = `当前 ${len} 字` + warn
+      + '　建议：实习最好不超过6个月，每周最好不超过6天。';
   }
 
   function toast(msg) {

@@ -13,7 +13,7 @@
 
     <groupId>com.zhou</groupId>
     <artifactId>intern-helper</artifactId>
-    <version>0.8.1</version>
+    <version>0.9.0</version>
     <name>intern-helper</name>
     <description>实习投递助手：岗位库 + 话术生成 + 投递记录与统计</description>
 

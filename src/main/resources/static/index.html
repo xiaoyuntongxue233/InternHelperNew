@@ -221,7 +221,7 @@
           <button onclick="contacted(${job.id})">标记已投</button>
           <button onclick="location.href='/form.html?id=${job.id}'">编辑</button>
           <button onclick="removeJob(${job.id}, '${escAttr(job.company)}', '${escAttr(job.title)}')" style="color:#c0392b;border-color:#e0b4ae">删除</button>
-          ${job.url ? `<a href="${job.url}" target="_blank" style="font-size:12px;margin-left:6px">打开</a>` : ''}
+          ${safeUrl(job.url) ? `<a href="${esc(safeUrl(job.url))}" target="_blank" rel="noopener noreferrer" style="font-size:12px;margin-left:6px">打开</a>` : ''}
         </td>`;
       rows.appendChild(tr);
 
@@ -315,11 +315,16 @@
     const g = await api(`/api/jobs/${id}/greeting`);
     box.dataset.loaded = '1';
     wrap.style.display = '';
+    box.dataset.message = g.message || '';
+    const warnings = (g.warnings || []).map(w => `<div class="muted">${esc(w)}</div>`).join('');
     box.innerHTML = `<span class="tag">${esc(g.direction)}</span>
       <span class="muted">${g.months}个月 / 每周${g.days}天 / ${g.length}字</span>
+      <span class="muted">引擎：${esc(g.engine || 'RULE')}${g.templateId ? ' · 模板：' + esc(g.templateId) : ''}</span>
       <div style="margin-top:8px">${esc(g.message)}</div>
+      <div class="muted" style="margin-top:8px">建议：${esc(g.advice || '')}</div>
+      ${warnings}
       <div style="margin-top:8px; display:flex; align-items:center; gap:8px">
-        <button onclick="copyText(\`${(g.message || '').replace(/`/g, '')}\`)">复制</button>
+        <button onclick="copyGreet(${id})">复制</button>
         <button onclick="collapseGreet(${id})">收起</button>
       </div>`;
   }
@@ -354,6 +359,11 @@
     return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
   }
 
+  function copyGreet(id) {
+    const box = document.getElementById('g-' + id);
+    if (box) copyText(box.dataset.message || '');
+  }
+
   function copyText(text) { navigator.clipboard.writeText(text).then(() => alert('已复制到剪贴板')); }
 
   async function refreshStats() {
@@ -371,6 +381,14 @@
         ? `最近同步：${(last.createdAt || '').replace('T', ' ').slice(0, 16)} · 新增 ${last.added} 条`
         : '尚未同步过';
     } catch (e) { /* ignore */ }
+  }
+
+  function safeUrl(s) {
+    if (!s) return '';
+    try {
+      const u = new URL(s, location.href);
+      return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : '';
+    } catch (e) { return ''; }
   }
 
   function esc(s) {

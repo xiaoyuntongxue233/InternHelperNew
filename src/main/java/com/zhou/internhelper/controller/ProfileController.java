@@ -54,10 +54,10 @@ public class ProfileController {
         if (patch.getMinLen() != null) p.setMinLen(patch.getMinLen());
         if (patch.getMaxLen() != null) p.setMaxLen(patch.getMaxLen());
 
-        // 两条硬约束：每周 ≤5 天、实习 ≤6 个月
-        p.setMaxMonths(clamp(p.getMaxMonths(), 2, 6));
+        // 两条硬约束：实习 ≤12 个月、每周 ≤7 天；建议值 6 个月 / 6 天只做提示
+        p.setMaxMonths(clamp(p.getMaxMonths(), 2, 12));
         p.setMinMonths(clamp(p.getMinMonths(), 1, p.getMaxMonths()));
-        p.setDaysPerWeek(clamp(p.getDaysPerWeek(), 1, 5));
+        p.setDaysPerWeek(clamp(p.getDaysPerWeek(), 1, 7));
 
         repo.save(p);
 
