@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>实习投递助手</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f5f7fa; color: #222; }
+    header { background: #1f6f63; color: #fff; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    header h1 { margin: 0; font-size: 20px; }
+    header a { color: #d8f0ea; font-size: 13px; text-decoration: none; border: 1px solid #4e8f85; padding: 5px 10px; border-radius: 6px; }
+    header a:hover { background: #2b8073; }
+    .stats { display: flex; gap: 20px; font-size: 13px; opacity: .95; flex-wrap: wrap; align-items: center; }
+    .stats b { font-size: 17px; }
+    .sync { margin-left: auto; font-size: 12px; opacity: .9; }
+    main { padding: 18px 24px 60px; max-width: 1360px; margin: 0 auto; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+    input, select, button { font-size: 14px; padding: 7px 10px; border: 1px solid #cfd6dd; border-radius: 6px; background: #fff; }
+    button { cursor: pointer; }
+    button.primary { background: #1f6f63; color: #fff; border-color: #1f6f63; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; }
+    th, td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid #eef1f4; vertical-align: top; }
+    td:last-child, th:last-child { white-space: nowrap; }
+    th { background: #f0f4f6; font-weight: 600; }
+    th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    th.sortable:hover { background: #e6edf0; }
+    th .arrow { color: #1f6f63; font-size: 11px; margin-left: 2px; }
+    tr:hover td { background: #fafcfd; }
+    .greet { margin-top: 6px; padding: 8px 14px; background: #f6fbf9; border: 1px dashed #a9cfc6; border-radius: 6px; font-size: 15px; line-height: 1.45; white-space: pre-wrap; width: 100%; max-width: none; }
+    .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #e8f3f0; color: #1f6f63; }
+    .muted { color: #889; font-size: 12px; }
+    .pager { margin-top: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .pager .info { margin-left: auto; color: #667; font-size: 13px; }
+    .pager input { width: 70px; }
+
+    /* ---------- 投递 ---------- */
+    .sel-col { width: 34px; text-align: center; }
+    .sel-col input { margin: 0; cursor: pointer; }
+    tr.selected td { background: #eef8f5; }
+    tr.selected:hover td { background: #e6f4ef; }
+    .toolbar .divider { width: 1px; height: 22px; background: #d7dee5; margin: 0 4px; }
+    .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 50; }
+    .modal-mask.show { display: flex; }
+    .modal { background: #fff; border-radius: 10px; width: min(720px, 92vw); max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+    .modal h2 { margin: 0; padding: 16px 20px; font-size: 16px; border-bottom: 1px solid #eef1f4; }
+    .modal .body { padding: 14px 20px; overflow: auto; }
+    .modal .foot { padding: 12px 20px; border-top: 1px solid #eef1f4; display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
+    .modal .warn { background: #fff7e6; border: 1px solid #ffe0a3; color: #7d5800; padding: 10px 12px; border-radius: 6px; font-size: 13px; line-height: 1.7; }
+    .modal ol { margin: 12px 0 0; padding-left: 20px; font-size: 13px; line-height: 1.9; }
+    .modal .foot .muted { margin-right: auto; }
+    #prog { position: fixed; right: 20px; bottom: 20px; width: 440px; max-height: 54vh; background: #fff; border: 1px solid #d7dee5; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.16); display: none; flex-direction: column; z-index: 60; overflow: hidden; }
+    #prog.show { display: flex; }
+    #prog .h { padding: 10px 14px; border-bottom: 1px solid #eef1f4; display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    #prog .h button { margin-left: 0; padding: 3px 9px; font-size: 12px; }
+    #prog .h .sp { margin-left: auto; }
+    #prog .c { padding: 8px 14px; font-size: 12px; display: flex; gap: 14px; border-bottom: 1px solid #f2f5f7; color: #667; }
+    #prog .c b { font-size: 15px; color: #222; }
+    #prog pre { margin: 0; padding: 10px 14px; overflow: auto; font-size: 12px; line-height: 1.6; background: #fbfcfd; flex: 1; white-space: pre-wrap; word-break: break-all; }
+    .ok { color: #1f7a4d; } .bad { color: #c0392b; } .skip { color: #8a6100; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>实习投递助手</h1>
+  <a href="/form.html">+ 添加岗位</a>
+  <a href="/profile.html">个人资料</a>
+  <div class="stats" id="stats">加载中…</div>
+</header>
+
+<main>
+  <div class="toolbar">
+    <select id="province"><option value="">全部省份</option></select>
+    <select id="city"><option value="">全部城市</option></select>
+    <select id="district"><option value="">全部区县</option></select>
+    <select id="category">
+      <option value="INTERN">仅实习岗</option>
+      <option value="">全部类型</option>
+      <option value="FULLTIME">仅社招岗</option>
+    </select>
+    <select id="status">
+      <option value="">全部状态</option>
+      <option value="NEW">未联系</option>
+      <option value="CONTACTED">已联系</option>
+    </select>
+    <input id="q" placeholder="搜索公司 / 岗位" style="width:190px" />
+    <button class="primary" onclick="applyFilter()">查询</button>
+    <button onclick="resetAll()">重置</button>
+    <span class="divider"></span>
+    <button onclick="syncContacted(this)" title="按发送日志和投递记录，把其实投过的岗位改成已联系">同步已投状态</button>
+    <span class="muted" id="total"></span>
+  </div>
+
+  <table>
+    <thead>
+    <tr>
+      <th class="sel-col"><input type="checkbox" id="selAll" title="全选本页" onclick="toggleSelectAll(this)"/></th>
+      <th style="width:160px">公司</th>
+      <th>岗位</th>
+      <th style="width:150px">地点</th>
+      <th style="width:92px" class="sortable" onclick="toggleSort('months')">实习(月)<span class="arrow" id="ar-months"></span></th>
+      <th style="width:100px" class="sortable" onclick="toggleSort('days')">出勤(天/周)<span class="arrow" id="ar-days"></span></th>
+      <th style="width:100px" class="sortable" onclick="toggleSort('dailyMin')">最低日薪(元)<span class="arrow" id="ar-dailyMin"></span></th>
+      <th style="width:100px" class="sortable" onclick="toggleSort('dailyMax')">最高日薪(元)<span class="arrow" id="ar-dailyMax"></span></th>
+      <th style="width:110px">薪资原文</th>
+      <th style="width:76px" class="sortable" onclick="toggleSort('status')">状态<span class="arrow" id="ar-status"></span></th>
+      <th style="width:200px">操作</th>
+    </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <div class="pager">
+    <button id="btnPrev" onclick="prevPage()">上一页</button>
+    <button id="btnNext" onclick="nextPage()">下一页</button>
+    <button onclick="firstPage()">回到第一页</button>
+    <select id="size" onchange="applyFilter()">
+      <option value="15">每页 15 条</option>
+      <option value="30">每页 30 条</option>
+      <option value="50">每页 50 条</option>
+    </select>
+    <span>跳转到</span>
+    <input id="jumpPage" type="number" min="1" placeholder="页码" />
+    <span>页</span>
+    <button onclick="jumpPage()">跳转</button>
+    <span class="info" id="pageInfo"></span>
+  </div>
+</main>
+
+<!-- 投递确认弹窗 -->
+<div class="modal-mask" id="deliverMask">
+  <div class="modal">
+    <h2>确认投递</h2>
+    <div class="body">
+      <div class="warn">
+        即将向 <b class="count">0</b> 个岗位<b>真实发送</b>打招呼消息，发出后无法撤回。<br/>
+        发送由 <code>tools/boss-greeting</code> 的脚本驱动 Edge 完成，请先确认：
+        浏览器已用 <code>--remote-debugging-port=9333</code> 启动、且 BOSS 已登录
+        （<code>node env_check.mjs</code> 返回 <code>code:0</code>）。
+      </div>
+      <ol class="items"></ol>
+    </div>
+    <div class="foot">
+      <span class="muted">逐条发送，间隔 20–45 秒</span>
+      <button onclick="closeDeliver()">取消</button>
+      <button class="primary" id="btnConfirmDeliver" onclick="confirmDeliver()">确认投递</button>
+    </div>
+  </div>
+</div>
+
+<!-- 投递进度 -->
+<div id="prog">
+  <div class="h">
+    <b id="progTitle">投递</b>
+    <span class="sp"></span>
+    <button onclick="stopDeliver()" style="color:#c0392b">中止</button>
+    <button onclick="closeProgress()">收起</button>
+  </div>
+  <div class="c" id="progCounts"></div>
+  <pre id="progLog"></pre>
+</div>
+
+<script>
+  // cursor 模式：顺序翻页，深翻页恒定耗时；offset 模式：跳页 / 排序
+  let cursor = null;
+  let nextCursor = null;
+  let stack = [];
+  let pageNo = 1;
+  let totalPages = 1;
+  let sortField = 'status';   // 默认按状态排：NEW 在前、CONTACTED 自动沉到最后
+  let sortOrder = 'desc';
+  let pageJobs = [];
+
+  async function api(path) {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error('请求失败 ' + res.status);
+    return res.json();
+  }
+
+  async function initRegions() {
+    const tree = await api('/api/jobs/regions/tree');
+    const p = document.getElementById('province');
+    tree.forEach(node => {
+      const opt = document.createElement('option');
+      opt.value = node.province;
+      opt.textContent = node.province;
+      opt.dataset.cities = JSON.stringify(node.cities);
+      p.appendChild(opt);
+    });
+    p.onchange = () => { fillCities(); load(true); };
+    document.getElementById('city').onchange = () => { fillDistricts(); load(true); };
+    document.getElementById('district').onchange = () => load(true);
+    document.getElementById('jumpPage').addEventListener('keydown', e => { if (e.key === 'Enter') jumpPage(); });
+  }
+
+  function fillCities() {
+    const p = document.getElementById('province');
+    const citySel = document.getElementById('city');
+    citySel.innerHTML = '<option value="">全部城市</option>';
+    const opt = p.options[p.selectedIndex];
+    if (!opt || !opt.dataset.cities) return;
+    JSON.parse(opt.dataset.cities).forEach(c => {
+      const o = document.createElement('option');
+      o.value = c; o.textContent = c;
+      citySel.appendChild(o);
+    });
+  }
+
+  async function fillDistricts() {
+    const province = document.getElementById('province').value;
+    const city = document.getElementById('city').value;
+    const dSel = document.getElementById('district');
+    dSel.innerHTML = '<option value="">全部区县</option>';
+    if (!province || !city) return;
+    const list = await api(`/api/jobs/regions/districts?province=${encodeURIComponent(province)}&city=${encodeURIComponent(city)}`);
+    list.forEach(d => {
+      const o = document.createElement('option');
+      o.value = d; o.textContent = d;
+      dSel.appendChild(o);
+    });
+  }
+
+  function buildParams() {
+    const params = new URLSearchParams();
+    params.set('size', document.getElementById('size').value);
+    const map = { province: 'province', city: 'city', district: 'district', status: 'status', q: 'q', category: 'category' };
+    Object.entries(map).forEach(([id, key]) => {
+      const v = document.getElementById(id).value.trim();
+      if (v) params.set(key, v);
+    });
+    if (sortField) {
+      params.set('sort', sortField);
+      params.set('order', sortOrder);
+    }
+    return params;
+  }
+
+  // reset=true 回到第一页；reset=false 顺序翻页（cursor）
+  async function load(reset, useOffset) {
+    if (reset) { cursor = null; nextCursor = null; stack = []; pageNo = 1; }
+    const params = buildParams();
+    if (useOffset || sortField) {
+      params.set('page', pageNo);
+    } else if (cursor != null) {
+      params.set('cursor', cursor);
+    }
+
+    const data = await api('/api/jobs?' + params);
+    if (data.mode === 'offset') {
+      totalPages = data.totalPages || 1;
+      pageNo = data.page || pageNo;
+    } else {
+      nextCursor = data.nextCursor;
+      totalPages = Math.max(1, Math.ceil(data.total / data.size));
+    }
+
+    document.getElementById('total').textContent = `符合条件的岗位：${data.total} 个`;
+    document.getElementById('pageInfo').textContent =
+      `共 ${data.total} 个岗位 · 第 ${pageNo} / ${totalPages} 页 · 每页 ${data.size} 条`;
+    document.getElementById('btnPrev').disabled = pageNo <= 1;
+    document.getElementById('btnNext').disabled = pageNo >= totalPages;
+    document.getElementById('jumpPage').max = String(totalPages);
+    updateArrows();
+
+    const rows = document.getElementById('rows');
+    rows.innerHTML = '';
+    pageJobs = data.items;
+    data.items.forEach(job => {
+      const loc = [job.province, job.city, job.district].filter(Boolean).join(' / ') || job.rawLocation || '';
+      const tr = document.createElement('tr');
+      tr.dataset.id = job.id;
+      if (selected.has(job.id)) tr.classList.add('selected');
+      // Ctrl / Cmd + 点击整行也能多选；点在按钮、链接、复选框上时不触发
+      tr.addEventListener('click', e => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        if (e.target.closest('button, a, input')) return;
+        e.preventDefault();
+        toggleSelect(job.id, job.company, job.title);
+      });
+      tr.innerHTML = `
+        <td class="sel-col"><input type="checkbox" class="jobsel" data-id="${job.id}"
+            ${selected.has(job.id) ? 'checked' : ''}
+            onclick="event.stopPropagation()"
+            onchange="onRowCheck(${job.id}, '${escAttr(job.company)}', '${escAttr(job.title)}', this.checked)"/></td>
+        <td>${esc(job.company)}</td>
+        <td>${esc(job.title)}${job.category === 'FULLTIME' ? ' <span class="tag" style="background:#fdeeee;color:#b33">社招</span>' : ''}<div class="muted">${esc(job.skills || '')}</div></td>
+        <td>${esc(loc)}</td>
+        <td>${job.months ? job.months : '<span class="muted">-</span>'}</td>
+        <td>${job.days ? job.days : '<span class="muted">-</span>'}</td>
+        <td>${job.dailyMin ? job.dailyMin : '<span class="muted">-</span>'}</td>
+        <td>${job.dailyMax ? job.dailyMax : '<span class="muted">-</span>'}</td>
+        <td class="muted">${esc(job.salary || '-')}</td>
+        <td><span class="tag" style="background:${job.status === 'CONTACTED' ? '#e6f0ff' : '#e8f3f0'}">${job.status === 'CONTACTED' ? '已联系' : '未联系'}</span></td>
+        <td>
+          <button onclick="gen(${job.id})">生成话术</button>
+          <button onclick="contacted(${job.id})">标记已投</button>
+          <button onclick="location.href='/form.html?id=${job.id}'">编辑</button>
+          <button onclick="removeJob(${job.id}, '${escAttr(job.company)}', '${escAttr(job.title)}')" style="color:#c0392b;border-color:#e0b4ae">删除</button>
+          ${job.url ? `<a href="${job.url}" target="_blank" style="font-size:12px;margin-left:6px">打开</a>` : ''}
+        </td>`;
+      rows.appendChild(tr);
+
+      // 话术面板单独占一行（colspan 全表宽），避免挤在窄列里变成细长条
+      const trG = document.createElement('tr');
+      trG.id = 'gr-' + job.id;
+      trG.style.display = 'none';
+      trG.innerHTML = `<td colspan="11" style="padding:0 12px 12px 12px"><div class="greet" id="g-${job.id}"></div></td>`;
+      rows.appendChild(trG);
+    });
+    refreshStats();
+    syncSelectionUI();
+  }
+
+  function applyFilter() { load(true); }
+
+  function prevPage() {
+    if (pageNo <= 1) return;
+    if (sortField) { pageNo--; load(false, true); return; }
+    if (!stack.length) return;
+    cursor = stack.pop();
+    pageNo--;
+    load(false);
+  }
+
+  function nextPage() {
+    if (pageNo >= totalPages) return;
+    if (sortField) { pageNo++; load(false, true); return; }
+    if (nextCursor == null) return;
+    stack.push(cursor);
+    cursor = nextCursor;
+    pageNo++;
+    load(false);
+  }
+
+  function firstPage() { load(true); }
+
+  function jumpPage() {
+    const input = document.getElementById('jumpPage');
+    let target = parseInt(input.value, 10);
+    if (isNaN(target) || target < 1) { alert('请输入正确的页码'); return; }
+    if (target > totalPages) { alert('超出范围，共 ' + totalPages + ' 页'); return; }
+    pageNo = target;
+    load(false, true);
+    input.value = '';
+  }
+
+  function toggleSort(field) {
+    if (sortField === field) {
+      sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortField = field;
+      sortOrder = 'asc';
+    }
+    pageNo = 1;
+    load(true, true);
+  }
+
+  function updateArrows() {
+    ['months', 'days', 'dailyMin', 'dailyMax', 'status'].forEach(f => {
+      const el = document.getElementById('ar-' + f);
+      if (!el) return;
+      el.textContent = sortField === f ? (sortOrder === 'asc' ? '▲' : '▼') : '';
+    });
+  }
+
+  function resetAll() {
+    document.getElementById('province').value = '';
+    fillCities();
+    document.getElementById('district').innerHTML = '<option value="">全部区县</option>';
+    document.getElementById('status').value = '';
+    document.getElementById('category').value = 'INTERN';
+    document.getElementById('q').value = '';
+    sortField = 'status';
+    sortOrder = 'desc';
+    load(true);
+  }
+
+  /** 按发送日志 + 投递记录，把其实投过的岗位改成已联系 */
+  async function syncContacted(btn) {
+    if (!confirm('将扫描发送日志与投递记录，把「其实已经投过」的岗位标记为已联系。\n不会发送任何消息，也不会删除数据。继续？')) return;
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '同步中…';
+    try {
+      const res = await fetch('/api/jobs/sync-contacted', { method: 'POST' });
+      const d = await res.json();
+      const lines = [
+        `扫描岗位：${d.scannedJobs} 个`,
+        `日志中成功发送的公司：${d.logCompanies} 家`,
+        `本次改成已联系：${d.updated} 个`,
+        `原本已是已联系：${d.alreadyContacted} 个`,
+        `补充投递记录：${d.recordsCreated} 条`,
+      ];
+      if (d.changed && d.changed.length) {
+        lines.push('', '改动明细（最多 15 条）：');
+        d.changed.slice(0, 15).forEach(c => lines.push(`  · ${c.company} / ${c.title}（依据：${c.evidence}）`));
+        if (d.changed.length > 15) lines.push(`  … 其余 ${d.changed.length - 15} 条见下方表格`);
+      }
+      alert(lines.join('\n'));
+      load(true, true);
+    } catch (e) {
+      alert('同步失败：' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = old;
+    }
+  }
+
+  async function gen(id) {
+    const wrap = document.getElementById('gr-' + id);
+    const box = document.getElementById('g-' + id);
+    if (!wrap || !box) return;
+    // 已经展开 → 再点一次收起（不重复请求）
+    if (wrap.style.display !== 'none') {
+      wrap.style.display = 'none';
+      return;
+    }
+    if (box.dataset.loaded === '1') {
+      wrap.style.display = '';
+      return;
+    }
+    const g = await api(`/api/jobs/${id}/greeting`);
+    box.dataset.loaded = '1';
+    wrap.style.display = '';
+    box.innerHTML = `<span class="tag">${esc(g.direction)}</span>
+      <span class="muted">${g.months}个月 / 每周${g.days}天 / ${g.length}字</span>
+      <div style="margin-top:8px">${esc(g.message)}</div>
+      <div style="margin-top:8px; display:flex; align-items:center; gap:8px">
+        <button onclick="copyText(\`${(g.message || '').replace(/`/g, '')}\`)">复制</button>
+        <button onclick="collapseGreet(${id})">收起</button>
+      </div>`;
+  }
+
+  function collapseGreet(id) {
+    const wrap = document.getElementById('gr-' + id);
+    if (wrap) wrap.style.display = 'none';
+  }
+
+  async function contacted(id) {
+    const res = await fetch(`/api/jobs/${id}/contacted`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+    });
+    const r = await res.json();
+    alert(r.success ? '已记录投递' : '记录失败');
+    load(false, !!sortField);
+  }
+
+  async function removeJob(id, company, title) {
+    if (!confirm(`确定删除「${company} / ${title}」吗？\n删除后不可恢复。`)) return;
+    const res = await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      alert('已删除');
+      load(false, !!sortField);
+    } else {
+      const d = await res.json().catch(() => ({}));
+      alert('删除失败：' + (d.message || res.status));
+    }
+  }
+
+  function escAttr(s) {
+    return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  }
+
+  function copyText(text) { navigator.clipboard.writeText(text).then(() => alert('已复制到剪贴板')); }
+
+  async function refreshStats() {
+    const d = await api('/api/stats');
+    const o = d.overview;
+    document.getElementById('stats').innerHTML =
+      `<span>今日已投 <b>${o.todaySuccess}</b> 家</span>
+       <span>累计成功 <b>${o.totalSuccess}</b></span>
+       <span>成功率 <b>${o.successRate}%</b></span>
+       <span>岗位库 <b>${o.jobTotal}</b>（未联系 ${o.jobNew}）</span>
+       <span class="sync" id="sync"></span>`;
+    try {
+      const last = await api('/api/import/latest');
+      document.getElementById('sync').textContent = last.synced
+        ? `最近同步：${(last.createdAt || '').replace('T', ' ').slice(0, 16)} · 新增 ${last.added} 条`
+        : '尚未同步过';
+    } catch (e) { /* ignore */ }
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ================= 投递：多选 / 确认 / 进度 =================
+  const selected = new Map();   // jobId -> {company, title}
+  let pollTimer = null;
+
+  function onRowCheck(id, company, title, checked) {
+    if (checked) selected.set(id, { company, title });
+    else selected.delete(id);
+    syncSelectionUI();
+  }
+
+  function toggleSelect(id, company, title) {
+    if (selected.has(id)) selected.delete(id);
+    else selected.set(id, { company, title });
+    syncSelectionUI();
+  }
+
+  function toggleSelectAll(cb) {
+    pageJobs.forEach(j => {
+      if (cb.checked) selected.set(j.id, { company: j.company, title: j.title });
+      else selected.delete(j.id);
+    });
+    syncSelectionUI();
+  }
+
+  function syncSelectionUI() {
+    const n = selected.size;
+    const btn = document.getElementById('btnDeliver');
+    if (btn) {
+      btn.textContent = `开始投递 (${n})`;
+      btn.disabled = n === 0;
+    }
+    const clear = document.getElementById('btnClearSel');
+    if (clear) clear.disabled = n === 0;
+
+    const boxes = [...document.querySelectorAll('input.jobsel')];
+    boxes.forEach(b => {
+      const id = Number(b.dataset.id);
+      const on = selected.has(id);
+      b.checked = on;
+      const tr = b.closest('tr');
+      if (tr) tr.classList.toggle('selected', on);
+    });
+    const all = document.getElementById('selAll');
+    if (all) {
+      all.checked = boxes.length > 0 && boxes.every(b => b.checked);
+      all.indeterminate = !all.checked && boxes.some(b => b.checked);
+    }
+  }
+
+  function clearSelection() {
+    selected.clear();
+    syncSelectionUI();
+  }
+
+  function openDeliver() {
+    if (!selected.size) return;
+    const items = [...selected.values()];
+    document.querySelector('#deliverMask .items').innerHTML =
+      items.map(v => `<li><b>${esc(v.company)}</b> · ${esc(v.title)}</li>`).join('');
+    document.querySelector('#deliverMask .count').textContent = items.length;
+    document.getElementById('deliverMask').classList.add('show');
+    document.getElementById('btnConfirmDeliver').disabled = false;
+  }
+
+  function closeDeliver() {
+    document.getElementById('deliverMask').classList.remove('show');
+  }
+
+  async function confirmDeliver() {
+    const ids = [...selected.keys()];
+    if (!ids.length) return;
+    document.getElementById('btnConfirmDeliver').disabled = true;
+    closeDeliver();
+    try {
+      const res = await fetch('/api/deliver', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      });
+      const data = await res.json();
+      if (!data.success) {
+        alert('启动失败：\n\n' + (data.message || '未知错误'));
+        return;
+      }
+      // 投递已启动：同时把 BOSS 消息页拉出来，方便随时查看结果
+      window.open('https://www.zhipin.com/web/geek/chat', '_blank');
+      showProgress();
+      startPolling();
+    } catch (e) {
+      alert('请求失败：' + e.message);
+    }
+  }
+
+  function showProgress() {
+    document.getElementById('prog').classList.add('show');
+  }
+
+  function closeProgress() {
+    document.getElementById('prog').classList.remove('show');
+  }
+
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollStatus();
+    pollTimer = setInterval(pollStatus, 1500);
+  }
+
+  async function pollStatus() {
+    let d;
+    try { d = await api('/api/deliver/status'); } catch (e) { return; }
+    renderProgress(d);
+    if (!d.running) {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      load(false, !!sortField);
+    }
+  }
+
+  function renderProgress(d) {
+    const done = (d.sent || 0) + (d.failed || 0) + (d.skipped || 0);
+    document.getElementById('progTitle').textContent = d.running ? '正在投递…' : '投递结束';
+    document.getElementById('progCounts').innerHTML =
+      `<span>目标 <b>${d.total || 0}</b></span>` +
+      `<span>成功 <b class="ok">${d.sent || 0}</b></span>` +
+      `<span>跳过 <b class="skip">${d.skipped || 0}</b></span>` +
+      `<span>失败 <b class="bad">${d.failed || 0}</b></span>` +
+      `<span>进度 <b>${done}/${d.total || 0}</b></span>`;
+    const pre = document.getElementById('progLog');
+    const tail = (d.logTail || []).slice(-100).join('\n');
+    pre.textContent = (d.error ? '✗ ' + d.error + '\n' : '') + tail;
+    pre.scrollTop = pre.scrollHeight;
+  }
+
+  async function stopDeliver() {
+    if (!confirm('确定中止当前投递任务吗？\n已经发出的消息不会撤回。')) return;
+    try {
+      await fetch('/api/deliver/stop', { method: 'POST' });
+    } catch (e) { /* ignore */ }
+  }
+
+  (async function () {
+    await initRegions();
+    load(true);
+    // 刷新页面后若任务仍在跑，自动把进度面板接回来
+    try {
+      const s = await api('/api/deliver/status');
+      if (s.running) { showProgress(); renderProgress(s); startPolling(); }
+    } catch (e) { /* ignore */ }
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>个人资料 · 实习投递助手</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f5f7fa; color: #222; }
+    header { background: #1f6f63; color: #fff; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    header h1 { margin: 0; font-size: 20px; }
+    header a { color: #d8f0ea; font-size: 13px; text-decoration: none; border: 1px solid #4e8f85; padding: 5px 10px; border-radius: 6px; }
+    header a:hover { background: #2b8073; }
+    header .save { margin-left: auto; }
+    main { padding: 18px 24px 60px; max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr 420px; gap: 20px; }
+    @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+    .card { background: #fff; border-radius: 8px; padding: 18px 20px; }
+    .card h2 { margin: 0 0 14px; font-size: 15px; color: #1f6f63; }
+    .row { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: center; margin-bottom: 10px; }
+    .row label { font-size: 13px; color: #556; }
+    input[type=text], input[type=number], select, textarea {
+      width: 100%; font-size: 14px; padding: 7px 10px; border: 1px solid #cfd6dd; border-radius: 6px; background: #fff; font-family: inherit;
+    }
+    textarea { min-height: 60px; resize: vertical; }
+    .hint { font-size: 12px; color: #889; margin-top: 2px; }
+    button { font-size: 14px; padding: 7px 14px; border: 1px solid #cfd6dd; border-radius: 6px; background: #fff; cursor: pointer; }
+    button.primary { background: #1f6f63; color: #fff; border-color: #1f6f63; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .preview { white-space: pre-wrap; line-height: 1.8; font-size: 13px; background: #f6fbf9; border: 1px dashed #a9cfc6; border-radius: 6px; padding: 12px; min-height: 120px; }
+    .len { font-size: 12px; color: #889; margin-top: 6px; }
+    .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #e8f3f0; color: #1f6f63; }
+    .toast { position: fixed; right: 20px; bottom: 20px; background: #1f6f63; color: #fff; padding: 10px 16px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity .2s; }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>个人资料</h1>
+  <a href="/">← 返回岗位列表</a>
+  <button class="primary save" onclick="save()" id="btnSave">保存</button>
+</header>
+
+<main>
+  <div class="card">
+    <h2>身份</h2>
+    <div class="row"><label>姓名</label><input type="text" id="name" placeholder="可留空"/></div>
+    <div class="row"><label>学校全称</label><input type="text" id="schoolFull" placeholder="如：某大学（某校区）"/></div>
+    <div class="row"><label>学校简称</label><input type="text" id="schoolShort" placeholder="如：某大学（简洁句式用它）"/></div>
+    <div class="row"><label>专业</label><input type="text" id="major" placeholder="如：某专业"/></div>
+    <div class="row"><label>年级</label><input type="text" id="grade" placeholder="如：2028届"/></div>
+    <div class="row"><label>学历</label><input type="text" id="degree" placeholder="本科"/></div>
+
+    <h2 style="margin-top:18px">技能</h2>
+    <div class="row">
+      <label>技能标签</label>
+      <input type="text" id="skills" placeholder="逗号分隔，如：Java,SpringBoot,MySQL"/>
+    </div>
+    <div class="row" style="align-items:start">
+      <label>技能佐证</label>
+      <div>
+        <textarea id="evidence" placeholder="key=句子;key=句子&#10;如：java=独立做过RBAC三级权限项目；spring=用过IoC与统一异常处理"></textarea>
+        <div class="hint">可选。留空则用系统内置的技能句。</div>
+      </div>
+    </div>
+
+    <h2 style="margin-top:18px">实习时长与出勤</h2>
+    <div class="row"><label>最少月数</label><input type="number" id="minMonths" min="1" max="6"/></div>
+    <div class="row"><label>最多月数</label><input type="number" id="maxMonths" min="1" max="6"/></div>
+    <div class="row"><label>每周天数</label><input type="number" id="daysPerWeek" min="1" max="5"/></div>
+    <div class="row"><label>可开始时间</label><input type="text" id="startFrom" placeholder="如：1 月中旬（可留空）"/></div>
+    <div class="hint" style="margin-left:120px">硬约束：每周 ≤ 5 天、实习 ≤ 6 个月，保存时后端会自动收敛。</div>
+
+    <h2 style="margin-top:18px">风格</h2>
+    <div class="row">
+      <label>句式</label>
+      <select id="style">
+        <option value="concise">简洁</option>
+        <option value="formal">正式</option>
+      </select>
+    </div>
+    <div class="row"><label>是否提 AI</label>
+      <select id="aiAgentOk">
+        <option value="true">提（会说会用 AI agent）</option>
+        <option value="false">不提</option>
+      </select>
+    </div>
+    <div class="row"><label>字数下限</label><input type="number" id="minLen" min="20" max="200"/></div>
+    <div class="row"><label>字数上限</label><input type="number" id="maxLen" min="20" max="200"/></div>
+  </div>
+
+  <div class="card">
+    <h2>话术预览 <span class="tag">按当前填写实时生成</span></h2>
+    <div class="preview" id="preview">—</div>
+    <div class="len" id="lenInfo"></div>
+    <div class="hint" style="margin-top:10px">
+      这是按模板的近似预览；实际生成时还会叠加岗位方向（技能句）与岗位要求的时长/出勤，以列表页「生成话术」的结果为准。
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const FIELDS = ['name','schoolFull','schoolShort','major','grade','degree','skills','evidence',
+                  'minMonths','maxMonths','daysPerWeek','startFrom','style','aiAgentOk','minLen','maxLen'];
+  const NUM = new Set(['minMonths','maxMonths','daysPerWeek','minLen','maxLen']);
+
+  function $(id) { return document.getElementById(id); }
+
+  function readForm() {
+    const p = {};
+    for (const f of FIELDS) {
+      const el = $(f);
+      if (!el) continue;
+      if (f === 'aiAgentOk') p[f] = el.value === 'true';
+      else if (NUM.has(f)) { const v = Number(el.value); p[f] = Number.isFinite(v) ? v : null; }
+      else p[f] = el.value;
+    }
+    return p;
+  }
+
+  function fillForm(p) {
+    for (const f of FIELDS) {
+      const el = $(f);
+      if (!el || p[f] === undefined || p[f] === null) continue;
+      if (f === 'aiAgentOk') el.value = p[f] ? 'true' : 'false';
+      else el.value = p[f];
+    }
+  }
+
+  function notBlank(s) { return s && String(s).trim(); }
+
+  function renderPreview() {
+    const p = readForm();
+    const school = notBlank(p.schoolFull) ? p.schoolFull : (notBlank(p.schoolShort) ? p.schoolShort : '某大学');
+    const grade = notBlank(p.grade) ? p.grade : '2028届';
+    const months = Math.min(Number(p.maxMonths) || 6, 6);
+    const days = Math.min(Number(p.daysPerWeek) || 5, 5);
+    const clause = '熟悉Java，有Springboot、MySQL相关经验';
+    const ai = p.aiAgentOk ? '，现可熟悉使用AI agent相关软件。' : '。';
+    const start = notBlank(p.startFrom);
+
+    let msg;
+    if (p.style === 'formal') {
+      msg = '您好！我是' + school + grade + '本科生'
+        + (notBlank(p.major) ? '，' + p.major + '专业' : '')
+        + '。本人' + clause + ai
+        + (start
+            ? '目前可' + p.startFrom + '起到岗，可保证连续实习' + months + '个月、每周出勤' + days + '天。'
+            : '目前可保证连续实习' + months + '个月、每周出勤' + days + '天。')
+        + '期待您的回复，感谢！';
+    } else {
+      msg = '您好，我是' + school + grade + '本科生，本人' + clause + ai
+        + (start
+            ? '本人可连续实习至少' + months + '个月，每周' + days + '天，' + p.startFrom + '即可到岗。希望收到您的回复。'
+            : '本人可连续实习至少' + months + '个月，每周' + days + '天。希望收到您的回复。');
+    }
+    $('preview').textContent = msg;
+
+    const len = msg.length;
+    const lo = Number(p.minLen) || 0, hi = Number(p.maxLen) || 999;
+    const warn = (len < lo || len > hi) ? `　⚠ 目标 ${lo}–${hi} 字` : '　✓ 在目标区间内';
+    $('lenInfo').textContent = `当前 ${len} 字` + warn;
+  }
+
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 1800);
+  }
+
+  async function load() {
+    try {
+      const r = await fetch('/api/profile');
+      const p = await r.json();
+      fillForm(p);
+      renderPreview();
+    } catch (e) { toast('读取失败：' + e.message); }
+  }
+
+  async function save() {
+    const btn = $('btnSave');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(readForm()),
+      });
+      const d = await r.json();
+      if (!d.success) { toast('保存失败'); return; }
+      fillForm(d.profile);      // 回填后端收敛后的值
+      renderPreview();
+      toast('已保存');
+    } catch (e) {
+      toast('保存失败：' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  for (const f of FIELDS) {
+    const el = $(f);
+    if (el) el.addEventListener('input', renderPreview);
+  }
+
+  load();
+</script>
+</body>
+</html>

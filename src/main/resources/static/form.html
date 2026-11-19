@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>岗位信息 - 实习投递助手</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f5f7fa; color: #222; }
+    header { background: #1f6f63; color: #fff; padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+    header h1 { margin: 0; font-size: 20px; }
+    header a { color: #d8f0ea; font-size: 13px; text-decoration: none; border: 1px solid #4e8f85; padding: 5px 10px; border-radius: 6px; }
+    main { padding: 26px 24px 60px; max-width: 760px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 10px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    h2 { margin: 0 0 18px; font-size: 17px; color: #1f6f63; }
+    .field { margin-bottom: 16px; }
+    label { display: block; font-size: 13px; color: #556; margin-bottom: 6px; }
+    label .req { color: #d9534f; }
+    input, select { width: 100%; font-size: 14px; padding: 9px 11px; border: 1px solid #cfd6dd; border-radius: 6px; }
+    input:focus, select:focus { outline: none; border-color: #1f6f63; }
+    .row { display: flex; gap: 12px; }
+    .row > .field { flex: 1; }
+    .hint { font-size: 12px; color: #889; margin-top: 5px; }
+    .salary-box { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .salary-box .seg { display: flex; border: 1px solid #cfd6dd; border-radius: 6px; overflow: hidden; }
+    .salary-box .seg button { border: none; border-radius: 0; padding: 9px 16px; background: #fff; cursor: pointer; font-size: 14px; }
+    .salary-box .seg button.on { background: #1f6f63; color: #fff; }
+    .salary-box input { width: 130px; }
+    .actions { display: flex; gap: 10px; margin-top: 22px; }
+    button { font-size: 14px; padding: 10px 18px; border-radius: 6px; border: 1px solid #cfd6dd; background: #fff; cursor: pointer; }
+    button.primary { background: #1f6f63; color: #fff; border-color: #1f6f63; }
+    button.danger { background: #fff; color: #c0392b; border-color: #e0b4ae; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .msg { margin-top: 16px; padding: 12px 14px; border-radius: 8px; font-size: 13px; display: none; white-space: pre-wrap; line-height: 1.7; }
+    .msg.ok { display: block; background: #e8f6f0; color: #1f6f63; border: 1px solid #b7dfd1; }
+    .msg.err { display: block; background: #fdeeee; color: #b33; border: 1px solid #f0c4c4; }
+  </style>
+</head>
+<body>
+<header>
+  <h1 id="pageTitle">添加岗位</h1>
+  <a href="/">返回列表</a>
+</header>
+
+<main>
+  <div class="card">
+    <h2 id="cardTitle">手动录入一个岗位</h2>
+    <form id="form">
+      <div class="field">
+        <label>公司名 <span class="req">*</span></label>
+        <input id="company" required placeholder="例如：某某科技有限公司" />
+      </div>
+
+      <div class="field">
+        <label>岗位 <span class="req">*</span></label>
+        <input id="title" required placeholder="例如：Java 后端开发实习生" />
+      </div>
+
+      <div class="field">
+        <label>地点 <span class="req">*</span></label>
+        <input id="location" required placeholder="例如：广州海珠区 / 北京海淀区" />
+        <div class="hint">省市区会自动识别</div>
+      </div>
+
+      <div class="field">
+        <label>薪资</label>
+        <div class="salary-box">
+          <div class="seg">
+            <button type="button" id="btnDaily" class="on" onclick="setSalaryType('DAILY')">日薪</button>
+            <button type="button" id="btnMonthly" onclick="setSalaryType('MONTHLY')">月薪</button>
+          </div>
+          <input id="salaryMin" type="number" min="0" placeholder="最低" />
+          <span>~</span>
+          <input id="salaryMax" type="number" min="0" placeholder="最高（可留空）" />
+          <span id="salaryUnit" class="muted">元/天</span>
+        </div>
+        <div class="hint" id="salaryHint">日薪填「元/天」，例如 200 ~ 300</div>
+      </div>
+
+      <div class="field">
+        <label>网页链接</label>
+        <input id="url" placeholder="https://www.zhipin.com/job_detail/....html" />
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label>实习时长（月）</label>
+          <input id="months" type="number" min="1" max="24" placeholder="选填" />
+        </div>
+        <div class="field">
+          <label>每周出勤（天）</label>
+          <input id="days" type="number" min="1" max="7" placeholder="选填" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label>岗位要求 / 备注</label>
+        <input id="jdText" placeholder="选填，例如：5天/周、6个月、熟悉 SpringBoot" />
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="primary" id="submitBtn">保存</button>
+        <button type="button" onclick="location.href='/'">取消</button>
+        <button type="button" class="danger" id="delBtn" style="display:none" onclick="removeJob()">删除这个岗位</button>
+      </div>
+    </form>
+    <div class="msg" id="msg"></div>
+  </div>
+</main>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const jobId = params.get('id');
+  const isEdit = !!jobId;
+  let salaryType = 'DAILY';
+
+  const msg = document.getElementById('msg');
+
+  function setSalaryType(type) {
+    salaryType = type;
+    document.getElementById('btnDaily').classList.toggle('on', type === 'DAILY');
+    document.getElementById('btnMonthly').classList.toggle('on', type === 'MONTHLY');
+    document.getElementById('salaryUnit').textContent = type === 'DAILY' ? '元/天' : '元/月';
+    document.getElementById('salaryHint').textContent = type === 'DAILY'
+      ? '日薪填「元/天」，例如 200 ~ 300'
+      : '月薪填「元/月」，例如 6000 ~ 8000（系统按 21.75 天折算日薪）';
+  }
+
+  async function loadJob() {
+    if (!isEdit) return;
+    document.getElementById('pageTitle').textContent = '修改岗位';
+    document.getElementById('cardTitle').textContent = '修改岗位信息';
+    document.getElementById('submitBtn').textContent = '保存修改';
+    document.getElementById('delBtn').style.display = 'inline-block';
+
+    const job = await fetch(`/api/jobs/${jobId}`).then(r => r.json());
+    document.getElementById('company').value = job.company || '';
+    document.getElementById('title').value = job.title || '';
+    document.getElementById('location').value = job.rawLocation || [job.province, job.city, job.district].filter(Boolean).join('') || '';
+    document.getElementById('url').value = job.url || '';
+    document.getElementById('jdText').value = job.jdText || '';
+    document.getElementById('months').value = job.months || '';
+    document.getElementById('days').value = job.days || '';
+
+    if (job.salaryType) {
+      setSalaryType(job.salaryType);
+      document.getElementById('salaryMin').value = job.salaryMin || '';
+      document.getElementById('salaryMax').value = job.salaryMax || '';
+    } else if (job.salary) {
+      // 历史文本薪资：尽量回填到输入框
+      const m = /(\d+)\s*-?\s*(\d+)?\s*([Kk])/.exec(job.salary);
+      if (m) {
+        setSalaryType('MONTHLY');
+        document.getElementById('salaryMin').value = parseInt(m[1], 10) * 1000;
+        document.getElementById('salaryMax').value = m[2] ? parseInt(m[2], 10) * 1000 : parseInt(m[1], 10) * 1000;
+      } else {
+        const d = /(\d+)\s*-?\s*(\d+)?\s*元\s*\/\s*天/.exec(job.salary);
+        if (d) {
+          setSalaryType('DAILY');
+          document.getElementById('salaryMin').value = d[1];
+          document.getElementById('salaryMax').value = d[2] || d[1];
+        }
+      }
+    }
+  }
+
+  document.getElementById('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    msg.className = 'msg';
+    msg.textContent = '';
+
+    const minRaw = document.getElementById('salaryMin').value;
+    const maxRaw = document.getElementById('salaryMax').value;
+    const body = {
+      company: document.getElementById('company').value.trim(),
+      title: document.getElementById('title').value.trim(),
+      rawLocation: document.getElementById('location').value.trim(),
+      url: document.getElementById('url').value.trim(),
+      jdText: document.getElementById('jdText').value.trim(),
+      months: document.getElementById('months').value ? parseInt(document.getElementById('months').value, 10) : null,
+      days: document.getElementById('days').value ? parseInt(document.getElementById('days').value, 10) : null,
+      salaryType: minRaw ? salaryType : null,
+      salaryMin: minRaw ? parseInt(minRaw, 10) : null,
+      salaryMax: maxRaw ? parseInt(maxRaw, 10) : null,
+    };
+
+    try {
+      const url = isEdit ? `/api/jobs/${jobId}` : '/api/jobs';
+      const method = isEdit ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || '保存失败');
+
+      const g = await fetch(`/api/jobs/${data.id}/greeting`).then(r => r.json());
+      msg.className = 'msg ok';
+      msg.innerHTML = `${isEdit ? '已保存修改' : '已添加'}：${esc(data.company)} / ${esc(data.title)}` +
+        `<br>地点：${esc([data.province, data.city, data.district].filter(Boolean).join(' / ') || data.rawLocation || '-')}` +
+        `<br>薪资：${esc(data.salary || '未填')}　折算日薪：${data.dailyMin ? (data.dailyMin === data.dailyMax ? data.dailyMin + ' 元/天' : data.dailyMin + ' ~ ' + data.dailyMax + ' 元/天') : '未识别'}` +
+        `<br>实习：${data.months ? data.months + ' 个月' : '-'}　出勤：${data.days ? '每周 ' + data.days + ' 天' : '-'}` +
+        `<br><br>生成的话术：<br>${esc(g.message)}`;
+      if (!isEdit) {
+        document.getElementById('form').reset();
+        setSalaryType('DAILY');
+      }
+    } catch (err) {
+      msg.className = 'msg err';
+      msg.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  async function removeJob() {
+    if (!isEdit) return;
+    const name = document.getElementById('company').value + ' / ' + document.getElementById('title').value;
+    if (!confirm(`确定删除「${name}」吗？\n删除后不可恢复。`)) return;
+    const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+    if (res.ok) {
+      alert('已删除，返回列表');
+      location.href = '/';
+    } else {
+      const d = await res.json().catch(() => ({}));
+      alert('删除失败：' + (d.message || res.status));
+    }
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  setSalaryType('DAILY');
+  loadJob();
+</script>
+</body>
+</html>
