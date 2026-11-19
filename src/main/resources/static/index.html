@@ -34,31 +34,6 @@
     .pager { margin-top: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .pager .info { margin-left: auto; color: #667; font-size: 13px; }
     .pager input { width: 70px; }
-
-    /* ---------- 投递 ---------- */
-    .sel-col { width: 34px; text-align: center; }
-    .sel-col input { margin: 0; cursor: pointer; }
-    tr.selected td { background: #eef8f5; }
-    tr.selected:hover td { background: #e6f4ef; }
-    .toolbar .divider { width: 1px; height: 22px; background: #d7dee5; margin: 0 4px; }
-    .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 50; }
-    .modal-mask.show { display: flex; }
-    .modal { background: #fff; border-radius: 10px; width: min(720px, 92vw); max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
-    .modal h2 { margin: 0; padding: 16px 20px; font-size: 16px; border-bottom: 1px solid #eef1f4; }
-    .modal .body { padding: 14px 20px; overflow: auto; }
-    .modal .foot { padding: 12px 20px; border-top: 1px solid #eef1f4; display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
-    .modal .warn { background: #fff7e6; border: 1px solid #ffe0a3; color: #7d5800; padding: 10px 12px; border-radius: 6px; font-size: 13px; line-height: 1.7; }
-    .modal ol { margin: 12px 0 0; padding-left: 20px; font-size: 13px; line-height: 1.9; }
-    .modal .foot .muted { margin-right: auto; }
-    #prog { position: fixed; right: 20px; bottom: 20px; width: 440px; max-height: 54vh; background: #fff; border: 1px solid #d7dee5; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.16); display: none; flex-direction: column; z-index: 60; overflow: hidden; }
-    #prog.show { display: flex; }
-    #prog .h { padding: 10px 14px; border-bottom: 1px solid #eef1f4; display: flex; align-items: center; gap: 8px; font-size: 13px; }
-    #prog .h button { margin-left: 0; padding: 3px 9px; font-size: 12px; }
-    #prog .h .sp { margin-left: auto; }
-    #prog .c { padding: 8px 14px; font-size: 12px; display: flex; gap: 14px; border-bottom: 1px solid #f2f5f7; color: #667; }
-    #prog .c b { font-size: 15px; color: #222; }
-    #prog pre { margin: 0; padding: 10px 14px; overflow: auto; font-size: 12px; line-height: 1.6; background: #fbfcfd; flex: 1; white-space: pre-wrap; word-break: break-all; }
-    .ok { color: #1f7a4d; } .bad { color: #c0392b; } .skip { color: #8a6100; }
   </style>
 </head>
 <body>
@@ -87,15 +62,12 @@
     <input id="q" placeholder="搜索公司 / 岗位" style="width:190px" />
     <button class="primary" onclick="applyFilter()">查询</button>
     <button onclick="resetAll()">重置</button>
-    <span class="divider"></span>
-    <button onclick="syncContacted(this)" title="按发送日志和投递记录，把其实投过的岗位改成已联系">同步已投状态</button>
     <span class="muted" id="total"></span>
   </div>
 
   <table>
     <thead>
     <tr>
-      <th class="sel-col"><input type="checkbox" id="selAll" title="全选本页" onclick="toggleSelectAll(this)"/></th>
       <th style="width:160px">公司</th>
       <th>岗位</th>
       <th style="width:150px">地点</th>
@@ -128,39 +100,6 @@
   </div>
 </main>
 
-<!-- 投递确认弹窗 -->
-<div class="modal-mask" id="deliverMask">
-  <div class="modal">
-    <h2>确认投递</h2>
-    <div class="body">
-      <div class="warn">
-        即将向 <b class="count">0</b> 个岗位<b>真实发送</b>打招呼消息，发出后无法撤回。<br/>
-        发送由 <code>tools/boss-greeting</code> 的脚本驱动 Edge 完成，请先确认：
-        浏览器已用 <code>--remote-debugging-port=9333</code> 启动、且 BOSS 已登录
-        （<code>node env_check.mjs</code> 返回 <code>code:0</code>）。
-      </div>
-      <ol class="items"></ol>
-    </div>
-    <div class="foot">
-      <span class="muted">逐条发送，间隔 20–45 秒</span>
-      <button onclick="closeDeliver()">取消</button>
-      <button class="primary" id="btnConfirmDeliver" onclick="confirmDeliver()">确认投递</button>
-    </div>
-  </div>
-</div>
-
-<!-- 投递进度 -->
-<div id="prog">
-  <div class="h">
-    <b id="progTitle">投递</b>
-    <span class="sp"></span>
-    <button onclick="stopDeliver()" style="color:#c0392b">中止</button>
-    <button onclick="closeProgress()">收起</button>
-  </div>
-  <div class="c" id="progCounts"></div>
-  <pre id="progLog"></pre>
-</div>
-
 <script>
   // cursor 模式：顺序翻页，深翻页恒定耗时；offset 模式：跳页 / 排序
   let cursor = null;
@@ -170,7 +109,6 @@
   let totalPages = 1;
   let sortField = 'status';   // 默认按状态排：NEW 在前、CONTACTED 自动沉到最后
   let sortOrder = 'desc';
-  let pageJobs = [];
 
   async function api(path) {
     const res = await fetch(path);
@@ -265,24 +203,10 @@
 
     const rows = document.getElementById('rows');
     rows.innerHTML = '';
-    pageJobs = data.items;
     data.items.forEach(job => {
       const loc = [job.province, job.city, job.district].filter(Boolean).join(' / ') || job.rawLocation || '';
       const tr = document.createElement('tr');
-      tr.dataset.id = job.id;
-      if (selected.has(job.id)) tr.classList.add('selected');
-      // Ctrl / Cmd + 点击整行也能多选；点在按钮、链接、复选框上时不触发
-      tr.addEventListener('click', e => {
-        if (!(e.ctrlKey || e.metaKey)) return;
-        if (e.target.closest('button, a, input')) return;
-        e.preventDefault();
-        toggleSelect(job.id, job.company, job.title);
-      });
       tr.innerHTML = `
-        <td class="sel-col"><input type="checkbox" class="jobsel" data-id="${job.id}"
-            ${selected.has(job.id) ? 'checked' : ''}
-            onclick="event.stopPropagation()"
-            onchange="onRowCheck(${job.id}, '${escAttr(job.company)}', '${escAttr(job.title)}', this.checked)"/></td>
         <td>${esc(job.company)}</td>
         <td>${esc(job.title)}${job.category === 'FULLTIME' ? ' <span class="tag" style="background:#fdeeee;color:#b33">社招</span>' : ''}<div class="muted">${esc(job.skills || '')}</div></td>
         <td>${esc(loc)}</td>
@@ -305,11 +229,10 @@
       const trG = document.createElement('tr');
       trG.id = 'gr-' + job.id;
       trG.style.display = 'none';
-      trG.innerHTML = `<td colspan="11" style="padding:0 12px 12px 12px"><div class="greet" id="g-${job.id}"></div></td>`;
+      trG.innerHTML = `<td colspan="10" style="padding:0 12px 12px 12px"><div class="greet" id="g-${job.id}"></div></td>`;
       rows.appendChild(trG);
     });
     refreshStats();
-    syncSelectionUI();
   }
 
   function applyFilter() { load(true); }
@@ -374,37 +297,6 @@
     sortField = 'status';
     sortOrder = 'desc';
     load(true);
-  }
-
-  /** 按发送日志 + 投递记录，把其实投过的岗位改成已联系 */
-  async function syncContacted(btn) {
-    if (!confirm('将扫描发送日志与投递记录，把「其实已经投过」的岗位标记为已联系。\n不会发送任何消息，也不会删除数据。继续？')) return;
-    const old = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '同步中…';
-    try {
-      const res = await fetch('/api/jobs/sync-contacted', { method: 'POST' });
-      const d = await res.json();
-      const lines = [
-        `扫描岗位：${d.scannedJobs} 个`,
-        `日志中成功发送的公司：${d.logCompanies} 家`,
-        `本次改成已联系：${d.updated} 个`,
-        `原本已是已联系：${d.alreadyContacted} 个`,
-        `补充投递记录：${d.recordsCreated} 条`,
-      ];
-      if (d.changed && d.changed.length) {
-        lines.push('', '改动明细（最多 15 条）：');
-        d.changed.slice(0, 15).forEach(c => lines.push(`  · ${c.company} / ${c.title}（依据：${c.evidence}）`));
-        if (d.changed.length > 15) lines.push(`  … 其余 ${d.changed.length - 15} 条见下方表格`);
-      }
-      alert(lines.join('\n'));
-      load(true, true);
-    } catch (e) {
-      alert('同步失败：' + e.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = old;
-    }
   }
 
   async function gen(id) {
@@ -485,153 +377,9 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  // ================= 投递：多选 / 确认 / 进度 =================
-  const selected = new Map();   // jobId -> {company, title}
-  let pollTimer = null;
-
-  function onRowCheck(id, company, title, checked) {
-    if (checked) selected.set(id, { company, title });
-    else selected.delete(id);
-    syncSelectionUI();
-  }
-
-  function toggleSelect(id, company, title) {
-    if (selected.has(id)) selected.delete(id);
-    else selected.set(id, { company, title });
-    syncSelectionUI();
-  }
-
-  function toggleSelectAll(cb) {
-    pageJobs.forEach(j => {
-      if (cb.checked) selected.set(j.id, { company: j.company, title: j.title });
-      else selected.delete(j.id);
-    });
-    syncSelectionUI();
-  }
-
-  function syncSelectionUI() {
-    const n = selected.size;
-    const btn = document.getElementById('btnDeliver');
-    if (btn) {
-      btn.textContent = `开始投递 (${n})`;
-      btn.disabled = n === 0;
-    }
-    const clear = document.getElementById('btnClearSel');
-    if (clear) clear.disabled = n === 0;
-
-    const boxes = [...document.querySelectorAll('input.jobsel')];
-    boxes.forEach(b => {
-      const id = Number(b.dataset.id);
-      const on = selected.has(id);
-      b.checked = on;
-      const tr = b.closest('tr');
-      if (tr) tr.classList.toggle('selected', on);
-    });
-    const all = document.getElementById('selAll');
-    if (all) {
-      all.checked = boxes.length > 0 && boxes.every(b => b.checked);
-      all.indeterminate = !all.checked && boxes.some(b => b.checked);
-    }
-  }
-
-  function clearSelection() {
-    selected.clear();
-    syncSelectionUI();
-  }
-
-  function openDeliver() {
-    if (!selected.size) return;
-    const items = [...selected.values()];
-    document.querySelector('#deliverMask .items').innerHTML =
-      items.map(v => `<li><b>${esc(v.company)}</b> · ${esc(v.title)}</li>`).join('');
-    document.querySelector('#deliverMask .count').textContent = items.length;
-    document.getElementById('deliverMask').classList.add('show');
-    document.getElementById('btnConfirmDeliver').disabled = false;
-  }
-
-  function closeDeliver() {
-    document.getElementById('deliverMask').classList.remove('show');
-  }
-
-  async function confirmDeliver() {
-    const ids = [...selected.keys()];
-    if (!ids.length) return;
-    document.getElementById('btnConfirmDeliver').disabled = true;
-    closeDeliver();
-    try {
-      const res = await fetch('/api/deliver', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids })
-      });
-      const data = await res.json();
-      if (!data.success) {
-        alert('启动失败：\n\n' + (data.message || '未知错误'));
-        return;
-      }
-      // 投递已启动：同时把 BOSS 消息页拉出来，方便随时查看结果
-      window.open('https://www.zhipin.com/web/geek/chat', '_blank');
-      showProgress();
-      startPolling();
-    } catch (e) {
-      alert('请求失败：' + e.message);
-    }
-  }
-
-  function showProgress() {
-    document.getElementById('prog').classList.add('show');
-  }
-
-  function closeProgress() {
-    document.getElementById('prog').classList.remove('show');
-  }
-
-  function startPolling() {
-    if (pollTimer) clearInterval(pollTimer);
-    pollStatus();
-    pollTimer = setInterval(pollStatus, 1500);
-  }
-
-  async function pollStatus() {
-    let d;
-    try { d = await api('/api/deliver/status'); } catch (e) { return; }
-    renderProgress(d);
-    if (!d.running) {
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-      load(false, !!sortField);
-    }
-  }
-
-  function renderProgress(d) {
-    const done = (d.sent || 0) + (d.failed || 0) + (d.skipped || 0);
-    document.getElementById('progTitle').textContent = d.running ? '正在投递…' : '投递结束';
-    document.getElementById('progCounts').innerHTML =
-      `<span>目标 <b>${d.total || 0}</b></span>` +
-      `<span>成功 <b class="ok">${d.sent || 0}</b></span>` +
-      `<span>跳过 <b class="skip">${d.skipped || 0}</b></span>` +
-      `<span>失败 <b class="bad">${d.failed || 0}</b></span>` +
-      `<span>进度 <b>${done}/${d.total || 0}</b></span>`;
-    const pre = document.getElementById('progLog');
-    const tail = (d.logTail || []).slice(-100).join('\n');
-    pre.textContent = (d.error ? '✗ ' + d.error + '\n' : '') + tail;
-    pre.scrollTop = pre.scrollHeight;
-  }
-
-  async function stopDeliver() {
-    if (!confirm('确定中止当前投递任务吗？\n已经发出的消息不会撤回。')) return;
-    try {
-      await fetch('/api/deliver/stop', { method: 'POST' });
-    } catch (e) { /* ignore */ }
-  }
-
   (async function () {
     await initRegions();
     load(true);
-    // 刷新页面后若任务仍在跑，自动把进度面板接回来
-    try {
-      const s = await api('/api/deliver/status');
-      if (s.running) { showProgress(); renderProgress(s); startPolling(); }
-    } catch (e) { /* ignore */ }
   })();
 </script>
 </body>

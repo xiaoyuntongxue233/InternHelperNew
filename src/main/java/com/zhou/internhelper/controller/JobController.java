@@ -4,7 +4,6 @@ import com.zhou.internhelper.entity.ApplicationRecord;
 import com.zhou.internhelper.entity.Job;
 import com.zhou.internhelper.repository.ApplicationRecordRepository;
 import com.zhou.internhelper.repository.JobRepository;
-import com.zhou.internhelper.service.ContactSyncService;
 import com.zhou.internhelper.service.GreetingService;
 import com.zhou.internhelper.service.JobService;
 import com.zhou.internhelper.service.RegionCatalog;
@@ -25,26 +24,14 @@ public class JobController {
     private final RegionCatalog regionCatalog;
     private final JobRepository jobRepository;
     private final ApplicationRecordRepository recordRepository;
-    private final ContactSyncService contactSyncService;
 
     public JobController(JobService jobService, GreetingService greetingService, RegionCatalog regionCatalog,
-                         JobRepository jobRepository, ApplicationRecordRepository recordRepository,
-                         ContactSyncService contactSyncService) {
+                         JobRepository jobRepository, ApplicationRecordRepository recordRepository) {
         this.jobService = jobService;
         this.greetingService = greetingService;
         this.regionCatalog = regionCatalog;
         this.jobRepository = jobRepository;
         this.recordRepository = recordRepository;
-        this.contactSyncService = contactSyncService;
-    }
-
-    /**
-     * 把「其实已经投过、但库里还是未联系」的岗位同步成已联系。
-     * 判据：发送日志里有 status=sent 的同名公司，或投递记录表里已有该公司。
-     */
-    @PostMapping("/sync-contacted")
-    public Map<String, Object> syncContacted() {
-        return contactSyncService.sync();
     }
 
     /** 游标/offset 分页 + 多条件筛选 + 排序 */

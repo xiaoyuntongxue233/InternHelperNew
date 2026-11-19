@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 12231
 
 spring:
   application:
@@ -33,19 +33,6 @@ app:
   # 岗位投放目录：抓取脚本把 json 丢进来，系统每 5 分钟自动导入并移到 imported/
   import-dir: ${IMPORT_DIR:import-drop}
   import-scan-ms: 300000
-  # 网页端「开始投递」：调用 tools/boss-greeting 的 Node 脚本，通过 CDP 遥控 Edge 真发
-  deliver:
-    # 打招呼脚本目录。相对路径以应用启动目录为准；建议用环境变量给绝对路径
-    script-dir: ${DELIVER_SCRIPT_DIR:../../打招呼脚本}
-    # node 可执行文件；填 node 会自动探测常见安装路径
-    node-exe: ${NODE_EXE:node}
-    # 必须与启动 Edge 时的 --remote-debugging-port 一致
-    cdp-url: ${CDP_URL:http://127.0.0.1:9333}
-    # 两条消息之间的随机间隔（秒）。宁慢勿快，太快容易触发风控
-    delay-min: 20
-    delay-max: 45
-    # 单次最多投递多少个（脚本自身还有每日上限）
-    limit-cap: 18
 
 logging:
   level:

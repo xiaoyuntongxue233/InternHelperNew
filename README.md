@@ -89,10 +89,10 @@ export CANDIDATE_GRADE=2028届
 
 # 3. 打包 & 启动
 mvn clean package -DskipTests
-java -jar target/intern-helper-0.8.0.jar
+java -jar target/intern-helper-0.8.1.jar
 
 # 4. 打开页面
-http://localhost:8080
+http://localhost:12231
 ```
 
 Windows PowerShell：
@@ -100,13 +100,13 @@ Windows PowerShell：
 ```powershell
 $env:MYSQL_PASSWORD="你的密码"
 $env:CANDIDATE_SCHOOL="你的学校"
-java -jar target\intern-helper-0.8.0.jar
+java -jar target\intern-helper-0.8.1.jar
 ```
 
 示例数据导入：
 
 ```bash
-curl -X POST http://localhost:8080/api/import/jobs \
+curl -X POST http://localhost:12231/api/import/jobs \
   -H "Content-Type: application/json; charset=utf-8" \
   --data-binary "@sample_jobs.json"
 ```
@@ -152,7 +152,7 @@ offset 模式额外返回 `page` / `totalPages`，`mode` 为 `offset`。
 示例：
 
 ```bash
-curl http://localhost:8080/api/jobs/1/greeting
+curl http://localhost:12231/api/jobs/1/greeting
 ```
 
 ```json
@@ -170,7 +170,7 @@ curl http://localhost:8080/api/jobs/1/greeting
 **方式一：手动导入**
 
 ```bash
-curl -X POST "http://localhost:8080/api/import/jobs?source=manual" \
+curl -X POST "http://localhost:12231/api/import/jobs?source=manual" \
   -H "Content-Type: application/json; charset=utf-8" \
   --data-binary "@sample_jobs.json"
 ```
@@ -217,6 +217,7 @@ Controller 只做参数接收和组装，业务在 Service，数据访问在 Rep
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
+| v0.8.1 | 2026-11-19 | 清掉自动投递残留（同步接口 / 脚本配置 / 前端投递弹窗）；默认端口改为 12231 |
 | v0.8 | 2026-11-18 | 更改示例，完成初版可公开项目 |
 | v0.7.1 | 2026-11-18 | 话术面板支持折叠：再点「生成话术」或点「收起」即收回，内容缓存不重复请求 |
 | v0.7 | 2026-11-18 | 新增个人资料页面；根据个人资料产生两套话术 |
@@ -226,6 +227,23 @@ Controller 只做参数接收和组装，业务在 Service，数据访问在 Rep
 | v0.3 | 2026-11-16 | 跳转到指定页、三列可排序、手动新增岗位页、薪资格式统一折算 |
 | v0.2 | 2026-11-16 | 省 / 市 / 区三级筛选、游标分页、导入批次留痕与自动入库 |
 | v0.1 | 2026-11-16 | 首个版本：岗位库、话术生成、投递记录与统计 |
+
+### v0.8.1（2026-11-19）
+
+**主题：把「自动投递」相关的残留彻底清掉，端口换成 12231。**
+
+对外版本一开始就把 CDP 自动投递整条链路删了，但代码里还留着一圈半截东西：一个只读外部发送日志的同步服务、一段指向 `打招呼脚本` 目录的配置、一整套前端投递弹窗。这次全部删除：
+
+- 删除 `service/ContactSyncService`、`service/BossScriptLocator`
+- 删除 `POST /api/jobs/sync-contacted` 接口，以及列表页的「同步已投状态」按钮
+- 删除 `application.yml` 的 `app.deliver.*`（脚本目录 / `node-exe` / CDP 地址 / 发送间隔 / 单次上限）
+- 删除列表页的投递确认弹窗、右下角进度面板、多选列与全选，以及所有 `/api/deliver*` 调用和配套 CSS，表格由 11 列回到 10 列
+- 默认端口 `8080` → `12231`（`application.yml` 的 `server.port`）
+- 版本号统一为 `0.8.1`，重新打包，jar 与源码一致
+
+清理前那个同步按钮在干净环境里是坏的：它要读 `../../打招呼脚本/out/send_log.jsonl`，而该目录不在交付物内，点一次就 500。现在代码里既没有发送逻辑，也没有发送链路的配置和入口。
+
+功能上少了一个「一键把历史已投岗位补成已联系」的按钮；这个能力原本只服务于脚本日志，随自动投递一起消失，正常投递仍用岗位行上的「标记已投」。
 
 ### v0.8（2026-11-18）
 
