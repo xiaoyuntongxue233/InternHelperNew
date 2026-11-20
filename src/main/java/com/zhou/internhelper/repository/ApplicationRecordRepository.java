@@ -1,6 +1,7 @@
 package com.zhou.internhelper.repository;
 
 import com.zhou.internhelper.entity.ApplicationRecord;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,6 +18,9 @@ public interface ApplicationRecordRepository extends JpaRepository<ApplicationRe
     boolean existsByCompany(String company);
 
     List<ApplicationRecord> findTop50ByOrderBySentAtDesc();
+
+    /** 带 limit 的最近记录查询（limit 通过 Pageable 的 pageSize 控制） */
+    List<ApplicationRecord> findByOrderBySentAtDesc(Pageable pageable);
 
     @Query("select r.company, count(r) from ApplicationRecord r where r.success = true group by r.company order by count(r) desc")
     List<Object[]> countGroupByCompany();

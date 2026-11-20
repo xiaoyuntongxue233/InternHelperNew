@@ -3,6 +3,7 @@ package com.zhou.internhelper.service;
 import com.zhou.internhelper.entity.ApplicationRecord;
 import com.zhou.internhelper.repository.ApplicationRecordRepository;
 import com.zhou.internhelper.repository.JobRepository;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -59,6 +60,22 @@ public class StatsService {
     }
 
     public List<ApplicationRecord> recent() {
-        return recordRepository.findTop50ByOrderBySentAtDesc();
+        return recent(50);
+    }
+
+    /** 最近 N 条投递记录：limit 收敛到 1–200，避免一次捞取过多 */
+    public List<ApplicationRecord> recent(int limit) {
+        int n = Math.max(1, Math.min(limit, 200));
+        return recordRepository.findByOrderBySentAtDesc(PageRequest.of(0, n));
+    }
+
+    /**
+     * 删除单条投递记录（用于清理测试数据）；统计每次实时计算，删除后自动反映。
+     * 先做存在性检查：删除不存在的记录不应伪成功（伪成功会掩盖前端 id 错误）。
+     */
+    public void deleteRecord(Long id) {
+        ApplicationRecord record = recordRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("投递记录不存在：" + id));
+        recordRepository.delete(record);
     }
 }

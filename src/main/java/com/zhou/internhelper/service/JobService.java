@@ -51,8 +51,8 @@ public class JobService {
               and (:district is null or j.district = :district)
               and (:category is null or j.category = :category)
               and (:q is null
-                   or lower(j.company) like lower(concat('%', :q, '%'))
-                   or lower(j.title) like lower(concat('%', :q, '%')))
+                   or lower(j.company) like lower(concat('%', :q, '%')) escape '!'
+                   or lower(j.title) like lower(concat('%', :q, '%')) escape '!')
             """;
 
     private final JobRepository jobRepository;
@@ -76,6 +76,14 @@ public class JobService {
     public Map<String, Object> search(String status, String province, String city, String district,
                                       String category, String q, Long cursor, Integer page,
                                       String sort, String order, int size) {
+        // 选项 C：数值（size/page）继续宽容回落；格式类参数（sort/order）严格 400——
+        // 这两个字段正常由表头点击生成，出现非法值意味着调用方写错或有探测行为。
+        if (sort != null && !SORTABLE.contains(SORT_ALIAS.getOrDefault(sort, sort))) {
+            throw new IllegalArgumentException("不支持的排序字段：" + sort);
+        }
+        if (order != null && !"asc".equalsIgnoreCase(order) && !"desc".equalsIgnoreCase(order)) {
+            throw new IllegalArgumentException("order 只能是 asc 或 desc");
+        }
         int limit = Math.max(1, Math.min(size, 100));
         Map<String, Object> params = new HashMap<>();
         params.put("status", blankToNull(status));
@@ -83,7 +91,11 @@ public class JobService {
         params.put("city", blankToNull(city));
         params.put("district", blankToNull(district));
         params.put("category", blankToNull(category));
-        params.put("q", blankToNull(q));
+        // LIKE 通配符转义：q 里的 %/_ 按字面匹配，! 作 escape 字符（避开 MySQL 反斜杠模式差异）。
+        // 顺序不可颠倒：先转义 ! 本身，再转义 % 与 _。
+        String qText = blankToNull(q);
+        params.put("q", qText == null ? null
+                : qText.replace("!", "!!").replace("%", "!%").replace("_", "!_"));
 
         long total = count(params);
         boolean useOffset = page != null || sort != null;
@@ -201,6 +213,18 @@ public class JobService {
         if (job.getDays() != null && (job.getDays() < 1 || job.getDays() > 7)) {
             throw new IllegalArgumentException("每周出勤需在 1–7 天之间");
         }
+        // 薪资非负且上限不低于下限（create/update/import 三条路径共用此校验）
+        if (job.getSalaryMin() != null && job.getSalaryMin() < 0) {
+            throw new IllegalArgumentException("薪资不能为负数");
+        }
+        if (job.getSalaryMax() != null) {
+            if (job.getSalaryMax() < 0) {
+                throw new IllegalArgumentException("薪资不能为负数");
+            }
+            if (job.getSalaryMin() != null && job.getSalaryMax() < job.getSalaryMin()) {
+                throw new IllegalArgumentException("薪资上限不能低于下限");
+            }
+        }
     }
 
     @Transactional
@@ -216,7 +240,14 @@ public class JobService {
         applySalary(job);
         applyMeta(job);
         classify(job);
-        return jobRepository.save(job);
+        // saveAndFlush 让唯一约束在方法内触发：并发下两个请求可能同时通过上面的查重，
+        // 后提交者会撞 uk_job_title_hash。当场捕获并转业务异常，避免延迟到事务提交后
+        // 在 Controller 之外抛出 DataIntegrityViolationException 落到 500。
+        try {
+            return jobRepository.saveAndFlush(job);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            throw new IllegalArgumentException("该公司的这个岗位已存在：" + job.getCompany() + " / " + job.getTitle());
+        }
     }
 
     /** 修改岗位：只覆盖传入的字段，返回更新后的对象 */

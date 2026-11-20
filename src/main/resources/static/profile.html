@@ -142,7 +142,7 @@
     const startClause = notBlank(p.startFrom) ? '，' + p.startFrom.trim() + '即可到岗' : '';
     const months = Math.min(Number(p.maxMonths) || 12, 12);
     const days = Math.min(Number(p.daysPerWeek) || 7, 7);
-    const clause = '熟悉Java，有SpringBoot、MySQL相关经验';
+    const clause = '具备岗位相关的基础能力';
     const ai = p.aiAgentOk ? '，也熟悉AI agent相关工具。' : '。';
 
     let msg;

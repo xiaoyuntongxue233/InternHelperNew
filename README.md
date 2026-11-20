@@ -106,7 +106,7 @@ export DEEPSEEK_PRICE_OUTPUT_PER_1M=输出单价_元每百万token
 
 # 3. 打包 & 启动
 mvn clean package -DskipTests
-java -jar target/intern-helper-0.10.2.jar
+java -jar target/intern-helper-0.10.3.jar
 
 # 4. 打开页面
 http://localhost:12231
@@ -117,7 +117,7 @@ Windows PowerShell：
 ```powershell
 $env:MYSQL_PASSWORD="你的密码"
 $env:CANDIDATE_SCHOOL="你的学校"
-java -jar target\intern-helper-0.10.2.jar
+java -jar target\intern-helper-0.10.3.jar
 ```
 
 示例数据导入：
@@ -147,7 +147,8 @@ curl -X POST http://localhost:12231/api/import/jobs \
 | GET | `/api/import/batches` | 最近 20 次导入批次 |
 | GET | `/api/import/latest` | 最后一次同步信息（页面顶部展示） |
 | GET | `/api/stats` | 总览 + 各公司投递 Top |
-| GET | `/api/stats/recent` | 最近 50 条投递记录 |
+| GET | `/api/stats/recent?limit=50` | 最近投递记录（limit 收敛到 1–200，默认 50） |
+| DELETE | `/api/stats/recent/{id}` | 删除单条投递记录（不存在返回 400） |
 | GET | `/api/settings` | 读取系统设置（API Key 脱敏）与额度 |
 | PUT | `/api/settings` | 保存系统设置，立即生效 |
 | POST | `/api/settings/test-connection` | 测试模型连接 |
@@ -168,7 +169,7 @@ curl -X POST http://localhost:12231/api/import/jobs \
 
 offset 模式额外返回 `page` / `totalPages`，`mode` 为 `offset`。
 
-排序参数：`sort` 可选 `months` / `days` / `dailyMin` / `dailyMax` / `id`，`order` 可选 `asc` / `desc`；**没解析出数值的岗位在排序时统一排最后**。（旧参数 `dailyPay` 已兼容映射到 `dailyMin`）
+排序参数：`sort` 可选 `months` / `days` / `dailyMin` / `dailyMax` / `company` / `status` / `id`，`order` 可选 `asc` / `desc`；**没解析出数值的岗位在排序时统一排最后**。（旧参数 `dailyPay` / `salary` 已兼容映射到 `dailyMin`）非法 `sort`/`order` 返回 400；`size` 收敛到 1–100、`page` 收敛到 1–末页（兼容手输页码与历史链接）。搜索 `q` 中的 `%`/`_`/`!` 按字面匹配，不作通配符。
 
 示例：
 
@@ -237,12 +238,16 @@ python 抓取 → 写入 import-drop/jobs-2024xxxx.json
 按「公司 + 岗位名」判重；每次导入写一条 `import_batch`，页面顶部就能显示「最近同步：xx 时间 · 新增 N 条」。
 
 **8. 分层与异常**
-Controller 只做参数接收和组装，业务在 Service，数据访问在 Repository；全局 `@RestControllerAdvice` 统一返回 `{code, message}`，避免异常直接抛到页面。
+Controller 只做参数接收和组装，业务在 Service，数据访问在 Repository；全局 `@RestControllerAdvice` 统一返回 `{code, message}`，避免异常直接抛到页面。类型错误 400、路径不存在 404、方法不支持 405、唯一键冲突 409。
+
+**9. 本机工具的安全边界**
+服务只监听 `127.0.0.1`（`server.address`），不对局域网开放；不提供跨源访问（CORS 默认拒绝），阻止任意站点读取本机数据；统一设置 5 个安全响应头（`nosniff` / `DENY` / `no-referrer` / `no-store` / 宽松 CSP 兼容内联脚本）。定位是单人本机工具，**无鉴权体系**——如需公网访问应放在反向代理后并自行加认证。
 
 ## 版本历史
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
+| v0.10.3 | 2026-11-20 | 按黑盒体验报告修 P0/P1（存储型 XSS、参数错误 400/404、本机绑定、技能句责任边界、移动端响应式、投递记录管理、薪资与字数校验）；同版本按复测报告补修并发唯一键 409、405 映射、安全响应头、核对提示前置黄条、记录删除语义与 limit、LIKE 通配符转义、sort/order 严格校验 |
 | v0.10.2 | 2026-11-20 | 软删岗位对外隔离；AI 自由生成改为「模型设计表达骨架 + 后端回填事实」架构；修复投递失败状态越界与导入绕过校验 |
 | v0.10.1 | 2026-11-20 | 修复成本与事实校验风险；同版本补充数据正确性、稳定性安全性与 API Key 加密、MySQL 5.7 去重兼容修复；再修复软删唯一键、去重误删、额度预留对称与测试记账 |
 | v0.10.0 | 2026-11-19 | 网页设置页（配置持久化）；AI 自由生成模式；修复保存设置的字段名映射；话术面板紧凑化与重新生成 |
@@ -257,6 +262,29 @@ Controller 只做参数接收和组装，业务在 Service，数据访问在 Rep
 | v0.3 | 2026-11-16 | 跳转到指定页、三列可排序、手动新增岗位页、薪资格式统一折算 |
 | v0.2 | 2026-11-16 | 省 / 市 / 区三级筛选、游标分页、导入批次留痕与自动入库 |
 | v0.1 | 2026-11-16 | 首个版本：岗位库、话术生成、投递记录与统计 |
+
+### v0.10.3（2026-11-20）
+
+**主题：按黑盒体验报告修复 P0 安全问题与 P1 健壮性/体验问题，不新增业务功能。**
+
+- **P0-1 存储型 XSS**：列表删除按钮由内联 `onclick` 拼接改为 `data-*` 属性 + tbody 事件委托，值用 `esc()` 全量实体编码，删除 `escAttr()`。公司/岗位名只作文本读取，不再进入脚本编译，根除双重解析注入面。
+- **P0-2 参数错误态**：`GlobalExceptionHandler` 新增绑定类异常 → 400（`MethodArgumentTypeMismatchException`、`MissingServletRequestParameterException`、非法 JSON 等），`NoResourceFoundException` → 404；固定中文文案，不透传内部类名。500 保留脱敏。
+- **P0-3 本机绑定**：`application.yml` 加 `server.address: 127.0.0.1`，服务不再对局域网开放（无鉴权场景下的最小收敛）。
+- **P1-1 事实责任边界**：默认技能句改为中性表述「具备岗位相关的基础能力」；`Facts` 记录技能句来源（PROFILE/RULE/DEFAULT），非用户资料来源时自动追加"请核对"警告；设置页与资料页文案同步。
+- **P1-4 移动端适配**：窄屏（≤768px）表格转卡片布局、导航与统计换行、状态标签不换行。
+- **P1-2 统计口径与记录管理**：「成功率」改为「今日成功率」并加口径提示；新增"投递记录"抽屉（复用 `/api/stats/recent`）与 `DELETE /api/stats/recent/{id}`，可清理测试残留；AI 额度账本仍不可变。
+- **P1-3 输入校验**：`validateJob` 增加薪资非负、上限不低于下限（create/update/import 共用）；个人资料 `minLen/maxLen` 收敛到 20–200。
+
+**同版本补充（复测报告，版本号不变）**：
+
+- **并发唯一键冲突**：`create()` 改用 `saveAndFlush` 并捕获 `DataIntegrityViolationException` 转业务异常；全局再加 409 兜底映射。并发重复创建不再返回 500。
+- **405 / 409 映射**：`HttpRequestMethodNotSupportedException` → 405（如对本为 GET 的接口发 POST），`DataIntegrityViolationException` → 409，均不透传内部信息。
+- **安全响应头**：新增 `SecurityHeadersConfig`，统一设置 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、`Cache-Control: no-store`、`Content-Security-Policy`（宽松策略，兼容内联脚本）。不引入鉴权。
+- **核对提示前置**：话术里的"请核对"警告从正文下方小字改为正文**上方醒目黄条**；提示不进入可复制内容，复制投递不带免责声明。窄屏统计栏末项加 `word-break` 修复截断。
+- **记录删除语义**：删除不存在的投递记录改为 400（不再伪成功）；`/api/stats/recent` 支持 `limit`（默认 50，收敛到 1–200）。
+- **搜索通配符转义**：`q` 中的 `%`/`_`/`!` 按字面匹配（`!` 作 escape，先转义自身），普通关键词搜索不变。
+- **数值边界（折中方案）**：`size`/`page` 继续宽容回落到安全边界（兼容历史链接与手输页码）；`sort`/`order` 非法值改为 400。
+- **N-07 复核**：复测称字数未收敛，但源码已有 clamp；补 `ProfileControllerTest` 锁定 `minLen=1/maxLen=9999 → 20/200` 行为，确认属测试口径差异，未改业务逻辑。
 
 ### v0.10.2（2026-11-20）
 

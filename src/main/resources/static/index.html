@@ -31,11 +31,58 @@
     .greet { margin-top: 2px; padding: 2px 10px; background: #f6fbf9; border: 1px dashed #a9cfc6; border-radius: 6px; font-size: 13px; line-height: 1.18; white-space: pre-wrap; width: 100%; max-width: none; }
     .greet button { padding: 1px 6px; font-size: 11px; }
     .greet .muted { font-size: 11px; }
+    .clause-alert { background: #fff4e5; color: #8a5a00; border: 1px solid #f0d8a8; border-radius: 6px; padding: 5px 8px; font-size: 12px; margin: 2px 0; line-height: 1.4; }
     .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #e8f3f0; color: #1f6f63; }
     .muted { color: #889; font-size: 12px; }
     .pager { margin-top: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .pager .info { margin-left: auto; color: #667; font-size: 13px; }
     .pager input { width: 70px; }
+    .drawer-mask { position: fixed; inset: 0; background: rgba(20,30,30,.4); display: none; justify-content: flex-end; z-index: 40; }
+    .drawer { background: #fff; width: min(560px, 100%); height: 100%; overflow: auto; padding: 20px 22px; box-shadow: -8px 0 30px rgba(0,0,0,.15); }
+    .drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .drawer-head h3 { margin: 0; font-size: 16px; color: #1f6f63; }
+    .drawer-head button { font-size: 22px; line-height: 1; padding: 2px 10px; }
+    .drawer-note { font-size: 12px; color: #889; margin: 10px 0 14px; line-height: 1.6; }
+    .rec { border-bottom: 1px solid #eef1f4; padding: 10px 0; }
+    .rec .meta { font-size: 12px; color: #889; }
+    .rec .msg { font-size: 13px; margin-top: 4px; white-space: pre-wrap; }
+    .rec button { margin-top: 6px; font-size: 12px; padding: 3px 8px; color: #c0392b; }
+    .status-tag { white-space: nowrap; }
+
+    /* ===== 移动端适配：窄屏表格转卡片 ===== */
+    @media (max-width: 768px) {
+      header { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
+      header h1 { font-size: 18px; flex-basis: 100%; }
+      header a { font-size: 12px; padding: 4px 8px; }
+      .stats { gap: 8px 14px; flex-basis: 100%; font-size: 12px; }
+      .stats b { font-size: 14px; }
+      .sync { margin-left: 0; flex-basis: 100%; word-break: break-all; white-space: normal; }
+      main { padding: 12px 14px 50px; }
+      .toolbar { gap: 6px; }
+      .toolbar select, .toolbar input { flex: 1 1 45%; min-width: 0; }
+
+      table, thead, tbody, tr, td { display: block; width: 100%; }
+      thead { display: none; }
+      tbody { display: block; }
+      tbody > tr:not(.greet-row) {
+        background: #fff; border: 1px solid #e6ecef; border-radius: 8px;
+        margin-bottom: 10px; padding: 10px 12px;
+      }
+      tbody > tr:not(.greet-row) td {
+        border: none; padding: 4px 0; text-align: left; white-space: normal;
+        display: flex; gap: 10px; align-items: flex-start;
+      }
+      tbody > tr:not(.greet-row) td::before {
+        content: attr(data-label); flex: 0 0 72px; color: #889; font-size: 12px; font-weight: 600;
+      }
+      tbody > tr:not(.greet-row) td[data-label="岗位"] { font-size: 14px; font-weight: 600; }
+      tbody > tr:not(.greet-row) td:last-child { flex-wrap: wrap; gap: 6px; }
+      tbody > tr:not(.greet-row) td:last-child::before { flex-basis: 100%; }
+      .greet-row td { padding: 0 !important; }
+      .greet { max-width: 100%; line-height: 1.5; }
+      .pager { gap: 6px; }
+      .pager .info { margin-left: 0; flex-basis: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -43,6 +90,7 @@
   <h1>实习投递助手</h1>
   <a href="/form.html">+ 添加岗位</a>
   <a href="/profile.html">个人资料</a>
+  <a href="javascript:void(0)" onclick="openRecords()">投递记录</a>
   <a href="/settings.html">设置</a>
   <div class="stats" id="stats">加载中…</div>
 </header>
@@ -102,6 +150,18 @@
     <span class="info" id="pageInfo"></span>
   </div>
 </main>
+
+<!-- 投递记录抽屉：复用 /api/stats/recent，支持删除测试残留 -->
+<div class="drawer-mask" id="recordsMask">
+  <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="recordsTitle">
+    <div class="drawer-head">
+      <h3 id="recordsTitle">投递记录（最近 50 条）</h3>
+      <button onclick="closeRecords()" aria-label="关闭">×</button>
+    </div>
+    <div class="drawer-note">删除岗位不影响历史投递记录；成功率按当日记录计算。AI 额度账本不可删除。</div>
+    <div id="recordsBox" style="font-size:13px;color:#667">加载中…</div>
+  </div>
+</div>
 
 <script>
   // cursor 模式：顺序翻页，深翻页恒定耗时；offset 模式：跳页 / 排序
@@ -211,20 +271,20 @@
       const loc = [job.province, job.city, job.district].filter(Boolean).join(' / ') || job.rawLocation || '';
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${esc(job.company)}</td>
-        <td>${esc(job.title)}${job.category === 'FULLTIME' ? ' <span class="tag" style="background:#fdeeee;color:#b33">社招</span>' : ''}<div class="muted">${esc(job.skills || '')}</div></td>
-        <td>${esc(loc)}</td>
-        <td>${job.months ? job.months : '<span class="muted">-</span>'}</td>
-        <td>${job.days ? job.days : '<span class="muted">-</span>'}</td>
-        <td>${job.dailyMin ? job.dailyMin : '<span class="muted">-</span>'}</td>
-        <td>${job.dailyMax ? job.dailyMax : '<span class="muted">-</span>'}</td>
-        <td class="muted">${esc(job.salary || '-')}</td>
-        <td><span class="tag" style="background:${job.status === 'CONTACTED' ? '#e6f0ff' : '#e8f3f0'}">${job.status === 'CONTACTED' ? '已联系' : '未联系'}</span></td>
-        <td>
+        <td data-label="公司">${esc(job.company)}</td>
+        <td data-label="岗位">${esc(job.title)}${job.category === 'FULLTIME' ? ' <span class="tag" style="background:#fdeeee;color:#b33">社招</span>' : ''}<div class="muted">${esc(job.skills || '')}</div></td>
+        <td data-label="地点">${esc(loc)}</td>
+        <td data-label="实习月数">${job.months ? job.months : '<span class="muted">-</span>'}</td>
+        <td data-label="出勤天数">${job.days ? job.days : '<span class="muted">-</span>'}</td>
+        <td data-label="最低日薪">${job.dailyMin ? job.dailyMin : '<span class="muted">-</span>'}</td>
+        <td data-label="最高日薪">${job.dailyMax ? job.dailyMax : '<span class="muted">-</span>'}</td>
+        <td class="muted" data-label="薪资原文">${esc(job.salary || '-')}</td>
+        <td data-label="状态"><span class="tag status-tag" style="background:${job.status === 'CONTACTED' ? '#e6f0ff' : '#e8f3f0'}">${job.status === 'CONTACTED' ? '已联系' : '未联系'}</span></td>
+        <td data-label="操作">
           <button onclick="gen(${job.id})">生成话术</button>
           <button onclick="contacted(${job.id})">标记已投</button>
           <button onclick="location.href='/form.html?id=${job.id}'">编辑</button>
-          <button onclick="removeJob(${job.id}, '${escAttr(job.company)}', '${escAttr(job.title)}')" style="color:#c0392b;border-color:#e0b4ae">删除</button>
+          <button class="btn-del" data-id="${job.id}" data-company="${esc(job.company)}" data-title="${esc(job.title)}" style="color:#c0392b;border-color:#e0b4ae">删除</button>
           ${safeUrl(job.url) ? `<a href="${esc(safeUrl(job.url))}" target="_blank" rel="noopener noreferrer" style="font-size:12px;margin-left:6px">打开</a>` : ''}
         </td>`;
       rows.appendChild(tr);
@@ -233,6 +293,7 @@
       const trG = document.createElement('tr');
       trG.id = 'gr-' + job.id;
       trG.style.display = 'none';
+      trG.className = 'greet-row';
       trG.innerHTML = `<td colspan="10" style="padding:0 12px 3px 12px"><div class="greet" id="g-${job.id}"></div></td>`;
       rows.appendChild(trG);
     });
@@ -307,16 +368,26 @@
     const box = document.getElementById('g-' + id);
     if (!box) return;
     box.dataset.loaded = '1';
+    // 只把话术正文作为可复制内容；核对提示不进入 dataset.message，复制不会带上免责声明
     box.dataset.message = g.message || '';
-    const warnings = (g.warnings || []).map(w => `<div class="muted">${esc(w)}</div>`).join('');
+    const allWarnings = g.warnings || [];
+    const isCheckHint = w => w.includes('请核对') || w.includes('技能句来自');
+    const alerts = allWarnings.filter(isCheckHint);
+    const others = allWarnings.filter(w => !isCheckHint(w));
+    // 事实核对提示前置为醒目黄条，正文下方只保留其余普通提示
+    const alertHtml = alerts.length
+      ? `<div class="clause-alert">⚠ ${alerts.map(esc).join(' ')}</div>`
+      : '';
+    const otherHtml = others.map(w => `<div class="muted">${esc(w)}</div>`).join('');
     box.innerHTML = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span class="tag">${esc(g.direction)}</span>
         <span class="muted">${g.months}个月 / 每周${g.days}天 / ${g.length}字</span>
         <span class="muted">引擎：${esc(g.engine || 'RULE')}${g.templateId ? ' · 模板：' + esc(g.templateId) : ''}</span>
       </div>
+      ${alertHtml}
       <div style="margin-top:2px">${esc(g.message)}</div>
       <div class="muted" style="margin-top:1px">建议：${esc(g.advice || '')}</div>
-      ${warnings}
+      ${otherHtml}
       <div style="margin-top:2px; display:flex; align-items:center; gap:8px">
         <button onclick="copyGreet(${id})">复制</button>
         <button onclick="collapseGreet(${id})">收起</button>
@@ -389,9 +460,13 @@
     }
   }
 
-  function escAttr(s) {
-    return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-  }
+  // 删除按钮用事件委托：公司/岗位名只作为 data-* 文本读取，不进入脚本编译，
+  // 彻底消除「JS 字符串嵌进 HTML 属性」的双重解析注入面（存储型 XSS）。
+  document.getElementById('rows').addEventListener('click', function (e) {
+    const btn = e.target.closest('.btn-del');
+    if (!btn) return;
+    removeJob(btn.dataset.id, btn.dataset.company, btn.dataset.title);
+  });
 
   function copyGreet(id) {
     const box = document.getElementById('g-' + id);
@@ -405,8 +480,8 @@
     const o = d.overview;
     document.getElementById('stats').innerHTML =
       `<span>今日已投 <b>${o.todaySuccess}</b> 家</span>
-       <span>累计成功 <b>${o.totalSuccess}</b></span>
-       <span>成功率 <b>${o.successRate}%</b></span>
+       <span title="按投递记录累计，不受岗位删除影响">累计成功 <b>${o.totalSuccess}</b></span>
+       <span title="按当日投递记录计算">今日成功率 <b>${o.successRate}%</b></span>
        <span>岗位库 <b>${o.jobTotal}</b>（未联系 ${o.jobNew}）</span>
        <span class="sync" id="sync"></span>`;
     try {
@@ -428,6 +503,47 @@
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
+
+  // ===== 投递记录抽屉 =====
+  function openRecords() {
+    document.getElementById('recordsMask').style.display = 'flex';
+    loadRecords();
+  }
+  function closeRecords() {
+    document.getElementById('recordsMask').style.display = 'none';
+  }
+  async function loadRecords() {
+    const box = document.getElementById('recordsBox');
+    box.textContent = '加载中…';
+    try {
+      const list = await api('/api/stats/recent');
+      if (!list.length) { box.textContent = '暂无投递记录'; return; }
+      box.innerHTML = list.map(r => `
+        <div class="rec">
+          <div><b>${esc(r.company)}</b> · ${esc(r.title || '')}
+            <span class="tag" style="background:${r.success ? '#e8f3f0' : '#fdeeee'};color:${r.success ? '#1f6f63' : '#b33'}">${r.success ? '成功' : '失败'}</span>
+          </div>
+          <div class="meta">${esc(String(r.sentAt || '').replace('T', ' ').slice(0, 16))}${r.failReason ? ' · ' + esc(r.failReason) : ''}</div>
+          ${r.message ? `<div class="msg">${esc(r.message)}</div>` : ''}
+          <button onclick="deleteRecord(${r.id})">删除这条记录</button>
+        </div>`).join('');
+    } catch (e) { box.textContent = '读取失败：' + e.message; }
+  }
+  async function deleteRecord(id) {
+    if (!confirm('确定删除这条投递记录吗？此操作不影响 AI 额度账本。')) return;
+    try {
+      await fetch(`/api/stats/recent/${id}`, { method: 'DELETE' });
+      await loadRecords();
+      await refreshStats();
+    } catch (e) { alert('删除失败：' + e.message); }
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    const mask = document.getElementById('recordsMask');
+    mask.addEventListener('click', function (e) { if (e.target === mask) closeRecords(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && mask.style.display === 'flex') closeRecords();
+    });
+  });
 
   (async function () {
     await initRegions();

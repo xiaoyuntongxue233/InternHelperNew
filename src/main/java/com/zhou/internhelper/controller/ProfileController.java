@@ -58,6 +58,9 @@ public class ProfileController {
         p.setMaxMonths(clamp(p.getMaxMonths(), 2, 12));
         p.setMinMonths(clamp(p.getMinMonths(), 1, p.getMaxMonths()));
         p.setDaysPerWeek(clamp(p.getDaysPerWeek(), 1, 7));
+        // 字数区间与 UI（20–200）对齐，避免出现界面填不到但库里存着的值
+        p.setMinLen(clamp(p.getMinLen(), 20, 200));
+        p.setMaxLen(clamp(p.getMaxLen(), p.getMinLen(), 200));
 
         repo.save(p);
 

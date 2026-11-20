@@ -35,7 +35,10 @@ public class GreetingService {
 
     public static final String ADVICE = "实习最好不超过6个月，每周最好不超过6天。";
     public static final String AI_PART = "，也熟悉AI agent相关工具。";
-    public static final String DEFAULT_CLAUSE = "熟悉Java，有SpringBoot、MySQL相关经验";
+    /** 默认技能句保持中性：不写死任何具体技术，避免变成未经用户确认的事实声明 */
+    public static final String DEFAULT_CLAUSE = "具备岗位相关的基础能力";
+    /** 非用户资料来源的技能句需要提示核对 */
+    private static final String CLAUSE_CHECK_HINT = "技能句来自内置规则/默认模板，请核对你是否具备后再投递。";
 
     /** 硬上限：可以超过建议值，但后端强制裁剪 */
     public static final int ABS_MAX_MONTHS = 12;
@@ -94,7 +97,8 @@ public class GreetingService {
     }
 
     private record Facts(String style, String direction, int months, int days,
-                         int minLen, int maxLen, Map<String, String> variables) {
+                         int minLen, int maxLen, Map<String, String> variables,
+                         String clauseSource) {
     }
 
     private record Validation(boolean ok, List<String> warnings) {
@@ -120,12 +124,13 @@ public class GreetingService {
         boolean aiEnabled = "AI".equalsIgnoreCase(engine) || "HYBRID".equalsIgnoreCase(engine);
         if (!aiEnabled) {
             if (free) {
-                List<String> warn = List.of("已选择 AI自由生成，但当前是 RULE 模式；已用简洁模板兜底，请切换到 AI / HYBRID。");
+                List<String> warn = withClauseHint(
+                        List.of("已选择 AI自由生成，但当前是 RULE 模式；已用简洁模板兜底，请切换到 AI / HYBRID。"), facts);
                 return new Greeting(draft, facts.direction(), facts.months(), facts.days(),
                         ADVICE, "RULE", "free", warn, false);
             }
             return new Greeting(draft, facts.direction(), facts.months(), facts.days(),
-                    ADVICE, "RULE", rendered.templateId(), List.of(), false);
+                    ADVICE, "RULE", rendered.templateId(), withClauseHint(List.of(), facts), false);
         }
         if (free) {
             return generateFreeWithAi(job, facts, draft, s);
@@ -175,7 +180,7 @@ public class GreetingService {
                     result.completionTokens(), result.usageReported(), estimate, greetingProperties.getPromptVersion());
             quota.release(reserved);
             return new Greeting(filled, facts.direction(), facts.months(), facts.days(),
-                    ADVICE, "AI", "free", warnings, false);
+                    ADVICE, "AI", "free", withClauseHint(warnings, facts), false);
         } catch (Exception e) {
             quota.release(reserved);
             log.warn("AI 自由生成失败，回退模板：{}", e.getMessage());
@@ -210,7 +215,7 @@ public class GreetingService {
                     result.completionTokens(), result.usageReported(), estimate, greetingProperties.getPromptVersion());
             quota.release(reserved);
             return new Greeting(result.message(), facts.direction(), facts.months(), facts.days(),
-                    ADVICE, "AI", templateId, warnings, false);
+                    ADVICE, "AI", templateId, withClauseHint(warnings, facts), false);
         } catch (Exception e) {
             quota.release(reserved);
             log.warn("AI 话术生成失败：{}", e.getMessage());
@@ -225,10 +230,10 @@ public class GreetingService {
         if (s.autoFallback()) {
             warnings.add("已使用内置模板生成。");
             return new Greeting(draft, facts.direction(), facts.months(), facts.days(),
-                    ADVICE, "AI", templateId, warnings, quotaExceeded);
+                    ADVICE, "AI", templateId, withClauseHint(warnings, facts), quotaExceeded);
         }
         return new Greeting("", facts.direction(), facts.months(), facts.days(),
-                ADVICE, "AI", templateId, warnings, quotaExceeded);
+                ADVICE, "AI", templateId, withClauseHint(warnings, facts), quotaExceeded);
     }
 
     /** 委托给独立校验器：数值精确匹配 + 技能白名单 + AI 提及开关 + 字数/学校/学历 */
@@ -250,6 +255,7 @@ public class GreetingService {
                 nullToEmpty(job.getJdText()));
 
         String clause = DEFAULT_CLAUSE;
+        String clauseSource = "DEFAULT";
         String direction = "通用 Java 方向";
         for (GreetingRule rule : ruleRepository.findByEnabledTrueOrderByPriorityAsc()) {
             Pattern pattern;
@@ -260,7 +266,13 @@ public class GreetingService {
                 continue;
             }
             if (pattern.matcher(blob).find()) {
-                clause = rule.getSkillClause() == null ? DEFAULT_CLAUSE : rule.getSkillClause();
+                if (rule.getSkillClause() == null) {
+                    clause = DEFAULT_CLAUSE;
+                    clauseSource = "DEFAULT";
+                } else {
+                    clause = rule.getSkillClause();
+                    clauseSource = "RULE";
+                }
                 direction = rule.getDirection() == null ? "未命名方向" : rule.getDirection();
                 break;
             }
@@ -269,6 +281,7 @@ public class GreetingService {
         String evidence = matchEvidence(p, blob + " " + nullToEmpty(p == null ? null : p.getSkills()));
         if (StringUtils.hasText(evidence)) {
             clause = clause + "，" + evidence;
+            clauseSource = "PROFILE";
         }
 
         int jobMonths = parseMonths(blob);
@@ -336,7 +349,16 @@ public class GreetingService {
                         job.getCity() == null ? "" : job.getCity(),
                         job.getDistrict() == null ? "" : job.getDistrict())));
 
-        return new Facts(style, direction, months, days, minLen, maxLen, variables);
+        return new Facts(style, direction, months, days, minLen, maxLen, variables, clauseSource);
+    }
+
+    /** 技能句非用户资料来源时，追加"请核对"提示（避免内置句被误当作用户真实经历） */
+    private List<String> withClauseHint(List<String> warnings, Facts facts) {
+        List<String> result = new ArrayList<>(warnings);
+        if (!"PROFILE".equals(facts.clauseSource())) {
+            result.add(CLAUSE_CHECK_HINT);
+        }
+        return result;
     }
 
     private String matchEvidence(CandidateProfile p, String blob) {

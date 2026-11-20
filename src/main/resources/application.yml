@@ -1,5 +1,7 @@
 server:
   port: 12231
+  # 只监听本机回环地址：本机工具默认不对局域网开放，避免无鉴权暴露
+  address: 127.0.0.1
 
 spring:
   application:

@@ -24,6 +24,8 @@ class JobServiceTest {
     private final Map<Long, Job> store = new LinkedHashMap<>();
     private final AtomicLong seq = new AtomicLong(0);
     private JobService service;
+    /** 打开后 saveAndFlush 模拟并发唯一键冲突 */
+    private boolean simulateUniqueConflict = false;
 
     @BeforeEach
     void setUp() {
@@ -38,7 +40,11 @@ class JobServiceTest {
 
     private Object handle(String name, Object[] args) {
         switch (name) {
-            case "save": {
+            case "save":
+            case "saveAndFlush": {
+                if ("saveAndFlush".equals(name) && simulateUniqueConflict) {
+                    throw new org.springframework.dao.DataIntegrityViolationException("uk_job_title_hash duplicate");
+                }
                 Job job = (Job) args[0];
                 if (job.getId() == null) job.setId(seq.incrementAndGet());
                 store.put(job.getId(), job);
@@ -121,6 +127,15 @@ class JobServiceTest {
         service.create(newJob("腾讯", "Java开发实习"));
         assertThrows(IllegalArgumentException.class,
                 () -> service.create(newJob("腾讯", "Java开发实习")));
+    }
+
+    @Test
+    void 并发唯一键冲突转业务异常而非500() {
+        simulateUniqueConflict = true;
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> service.create(newJob("腾讯", "Java开发实习")),
+                "唯一键冲突应转成业务异常，不得漏出 DataIntegrityViolationException");
+        assertTrue(ex.getMessage().contains("已存在"));
     }
 
     @Test
@@ -228,6 +243,42 @@ class JobServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.update(id, patch));
         assertNull(store.get(id).getTitleHash(), "编辑被拒后哈希仍应为空，不占用唯一键");
         assertEquals("岗位A", store.get(id).getTitle(), "编辑被拒后标题不应被修改");
+    }
+
+    @Test
+    void 负薪资被拒绝() {
+        Job job = newJob("腾讯", "Java实习");
+        job.setSalaryMin(-100);
+        job.setSalaryMax(-50);
+        assertThrows(IllegalArgumentException.class, () -> service.create(job));
+    }
+
+    @Test
+    void 薪资上限低于下限被拒绝() {
+        Job job = newJob("腾讯", "Java实习");
+        job.setSalaryMin(300);
+        job.setSalaryMax(100);
+        assertThrows(IllegalArgumentException.class, () -> service.create(job));
+    }
+
+    @Test
+    void 合法薪资通过校验() {
+        Job job = newJob("腾讯", "Java实习");
+        job.setSalaryMin(200);
+        job.setSalaryMax(400);
+        Job saved = assertDoesNotThrow(() -> service.create(job));
+        assertNotNull(saved.getTitleHash());
+    }
+
+    @Test
+    void 导入含非法薪资条目被跳过() {
+        Job good = newJob("字节", "Java实习");
+        good.setSalaryMin(200);
+        Job badSalary = newJob("腾讯", "后端实习");
+        badSalary.setSalaryMin(-1);
+
+        int added = service.importJobs(java.util.List.of(good, badSalary));
+        assertEquals(1, added);
     }
 
     @Test
