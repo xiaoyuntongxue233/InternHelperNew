@@ -28,6 +28,9 @@ public class ImportBatch {
 
     private Integer skipped;
 
+    /** 因缺少 company/title 必填字段而被跳过的条目数 */
+    private Integer invalid;
+
     @Column(nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
@@ -43,6 +46,8 @@ public class ImportBatch {
     public void setAdded(Integer added) { this.added = added; }
     public Integer getSkipped() { return skipped; }
     public void setSkipped(Integer skipped) { this.skipped = skipped; }
+    public Integer getInvalid() { return invalid; }
+    public void setInvalid(Integer invalid) { this.invalid = invalid; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

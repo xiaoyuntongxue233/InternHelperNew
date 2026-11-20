@@ -81,6 +81,14 @@
           <option value="false">关闭 · 失败时不返回话术</option>
         </select>
       </div>
+      <div class="advanced">
+        <div style="font-size:13px;color:#556;margin-bottom:8px"><b>话术字数范围</b>（仅 AI 润色 / 自由生成生效）</div>
+        <div class="row"><label>字数下限</label><input type="number" id="minLen" min="20" max="200"/></div>
+        <div class="row"><label>字数上限</label><input type="number" id="maxLen" min="20" max="200"/></div>
+        <div class="hint" style="margin-left:130px">
+          推荐 <b>55–110 字</b>（招聘方扫读友好）。字数边界只在 AI / HYBRID 模式作为参数传给模型；RULE 模式使用内置固定句式，长度不可配置。此处与个人资料页共享同一份设置。
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -203,8 +211,18 @@
       const d = await api('/api/settings');
       fillSettings(d.settings);
       fillQuota(d.quota);
+      await loadLen();
       await loadUsage();
     } catch (e) { toast('读取失败：' + e.message); }
+  }
+
+  // 字数范围存在个人资料里，与 profile.html 共享；此处只读两个字段
+  async function loadLen() {
+    try {
+      const p = await api('/api/profile');
+      if (p.minLen != null) $('minLen').value = p.minLen;
+      if (p.maxLen != null) $('maxLen').value = p.maxLen;
+    } catch (e) { /* 字数读取失败不影响主流程 */ }
   }
 
   async function loadUsage() {
@@ -241,6 +259,14 @@
     try {
       const d = await api('/api/settings', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(collect())
+      });
+      // 字数范围存在个人资料里，单独保存；只传这两个字段，不覆盖其他资料。
+      // 空值兜底到推荐区间，避免字符串空值导致后端 Integer 绑定失败。
+      const lo = Number($('minLen').value) || 55;
+      const hi = Number($('maxLen').value) || 110;
+      await api('/api/profile', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ minLen: lo, maxLen: hi })
       });
       fillSettings(d.settings);
       fillQuota(d.quota);

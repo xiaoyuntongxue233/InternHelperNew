@@ -88,6 +88,9 @@
     </div>
     <div class="row"><label>字数下限</label><input type="number" id="minLen" min="20" max="200"/></div>
     <div class="row"><label>字数上限</label><input type="number" id="maxLen" min="20" max="200"/></div>
+    <div class="hint" style="margin-left:120px">
+      推荐 55–110 字。字数边界仅对 AI 润色 / 自由生成生效（作为参数传给模型）；RULE 模式使用内置固定句式，长度不可配置。也可在「设置 → 生成引擎」中调整。
+    </div>
   </div>
 
   <div class="card">
@@ -156,10 +159,10 @@
     $('preview').textContent = msg;
 
     const len = msg.length;
-    const lo = Number(p.minLen) || 0, hi = Number(p.maxLen) || 999;
-    const warn = (len < lo || len > hi) ? `　⚠ 目标 ${lo}–${hi} 字` : '　✓ 在目标区间内';
-    $('lenInfo').textContent = `当前 ${len} 字` + warn
-      + '　建议：实习最好不超过6个月，每周最好不超过6天。';
+    // 预览是 RULE 固定句式，长度不受字数边界约束；只展示实际字数，
+    // 字数区间仅对 AI 模式生效，避免用「⚠ 超范围」误导用户。
+    $('lenInfo').textContent = `当前 ${len} 字（模板预览，固定句式）`
+      + '　字数边界仅对 AI 润色生效　建议：实习最好不超过6个月，每周最好不超过6天。';
   }
 
   function toast(msg) {

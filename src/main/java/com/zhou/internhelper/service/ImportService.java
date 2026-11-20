@@ -66,18 +66,29 @@ public class ImportService {
             throw new IllegalArgumentException("请求体需要是数组，或者包含 jobs 数组的对象");
         }
         List<Job> jobs = new ArrayList<>();
+        int invalid = 0;
         for (JsonNode node : array) {
             String company = text(node, "company");
             String title = text(node, "title");
-            if (company == null || title == null) {
+            if (company == null || title == null || company.isBlank() || title.isBlank()) {
+                invalid++;
+                log.warn("导入跳过缺少必填字段的条目：company={}, title={}", company, title);
                 continue;
             }
             Job job = new Job();
             job.setCompany(company);
             job.setTitle(title);
-            job.setRawLocation(text(node, "city"));
+            // 地点字段与手动录入统一：优先 rawLocation/location/raw_location，
+            // 最后兼容抓取脚本惯用的 city。任一命中即作为原始地点交给 normalizeRegion 拆分。
+            job.setRawLocation(firstText(node, "rawLocation", "location", "raw_location", "city"));
             job.setSalary(text(node, "salary"));
-            job.setUrl(text(node, "url"));
+            // url 做协议校验：只接受 http/https，javascript: 等协议置空，避免脏数据入库
+            String url = text(node, "url");
+            if (url != null && !isHttpUrl(url)) {
+                log.warn("导入岗位 {} / {} 的 url 协议不被接受，已忽略：{}", company, title, url);
+                url = null;
+            }
+            job.setUrl(url);
             job.setSkills(text(node, "skills"));
             job.setJdText(text(node, "jdText") != null ? text(node, "jdText") : text(node, "jd"));
             // 抓取脚本可能已经把时长/出勤算好了，有就直接用
@@ -95,6 +106,7 @@ public class ImportService {
         batch.setReceived(jobs.size());
         batch.setAdded(added);
         batch.setSkipped(jobs.size() - added);
+        batch.setInvalid(invalid);
         batch.setCreatedAt(LocalDateTime.now());
         return batchRepository.save(batch);
     }
@@ -151,6 +163,27 @@ public class ImportService {
     private String text(JsonNode node, String field) {
         JsonNode v = node.get(field);
         return v == null || v.isNull() ? null : v.asText();
+    }
+
+    /** 依次取第一个非空的文本字段，兼容多种字段约定 */
+    private String firstText(JsonNode node, String... fields) {
+        for (String field : fields) {
+            String v = text(node, field);
+            if (v != null && !v.isBlank()) {
+                return v;
+            }
+        }
+        return null;
+    }
+
+    /** 只接受 http/https 协议；拒绝 javascript:/data:/file: 等危险协议 */
+    private boolean isHttpUrl(String url) {
+        try {
+            String scheme = java.net.URI.create(url.trim()).getScheme();
+            return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private Integer number(JsonNode node, String field) {

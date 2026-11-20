@@ -29,6 +29,7 @@ public class ImportController {
         map.put("received", batch.getReceived());
         map.put("added", batch.getAdded());
         map.put("skipped", batch.getSkipped());
+        map.put("invalid", batch.getInvalid());
         map.put("createdAt", batch.getCreatedAt());
         return map;
     }

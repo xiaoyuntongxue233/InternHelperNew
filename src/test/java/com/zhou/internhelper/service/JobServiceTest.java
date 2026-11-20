@@ -35,7 +35,11 @@ class JobServiceTest {
                 (proxy, method, args) -> handle(method.getName(), args));
         service = new JobService(repo, new RegionCatalog(), new MetaParser(),
                 (EntityManager) Proxy.newProxyInstance(EntityManager.class.getClassLoader(),
-                        new Class<?>[]{EntityManager.class}, (p, m, a) -> null));
+                        new Class<?>[]{EntityManager.class}, (p, m, a) -> null),
+                (com.zhou.internhelper.repository.ApplicationRecordRepository) Proxy.newProxyInstance(
+                        com.zhou.internhelper.repository.ApplicationRecordRepository.class.getClassLoader(),
+                        new Class<?>[]{com.zhou.internhelper.repository.ApplicationRecordRepository.class},
+                        (p, m, a) -> "toString".equals(m.getName()) ? "RecordRepoStub" : null));
     }
 
     private Object handle(String name, Object[] args) {
@@ -304,6 +308,25 @@ class JobServiceTest {
         assertEquals("CONTACTED", service.nextStatusAfterFailure("CONTACTED"));
         assertEquals("NEW", service.nextStatusAfterFailure("NEW"));
         assertEquals("NEW", service.nextStatusAfterFailure(null), "历史脏数据 null 归一为 NEW");
+    }
+
+    @Test
+    void 更新状态拒绝非法枚举() {
+        Job a = service.create(newJob("腾讯", "岗位A"));
+        assertThrows(IllegalArgumentException.class, () -> service.updateStatus(a.getId(), "BOGUS"));
+        assertThrows(IllegalArgumentException.class, () -> service.updateStatus(a.getId(), null));
+        assertEquals("NEW", store.get(a.getId()).getStatus(), "非法状态不应写入");
+    }
+
+    @Test
+    void 状态下拉三态均可设置() {
+        Job a = service.create(newJob("腾讯", "岗位A"));
+        assertDoesNotThrow(() -> service.updateStatus(a.getId(), "CONTACTED"));
+        assertEquals("CONTACTED", store.get(a.getId()).getStatus());
+        assertDoesNotThrow(() -> service.updateStatus(a.getId(), "SKIPPED"));
+        assertEquals("SKIPPED", store.get(a.getId()).getStatus());
+        assertDoesNotThrow(() -> service.updateStatus(a.getId(), "NEW"));
+        assertEquals("NEW", store.get(a.getId()).getStatus());
     }
 
     @Test

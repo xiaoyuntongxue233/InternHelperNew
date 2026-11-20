@@ -1,6 +1,8 @@
 package com.zhou.internhelper.service;
 
+import com.zhou.internhelper.entity.ApplicationRecord;
 import com.zhou.internhelper.entity.Job;
+import com.zhou.internhelper.repository.ApplicationRecordRepository;
 import com.zhou.internhelper.repository.JobRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
@@ -13,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -59,13 +63,16 @@ public class JobService {
     private final RegionCatalog regionCatalog;
     private final MetaParser metaParser;
     private final EntityManager entityManager;
+    private final ApplicationRecordRepository recordRepository;
 
     public JobService(JobRepository jobRepository, RegionCatalog regionCatalog,
-                      MetaParser metaParser, EntityManager entityManager) {
+                      MetaParser metaParser, EntityManager entityManager,
+                      ApplicationRecordRepository recordRepository) {
         this.jobRepository = jobRepository;
         this.regionCatalog = regionCatalog;
         this.metaParser = metaParser;
         this.entityManager = entityManager;
+        this.recordRepository = recordRepository;
     }
 
     /**
@@ -83,6 +90,10 @@ public class JobService {
         }
         if (order != null && !"asc".equalsIgnoreCase(order) && !"desc".equalsIgnoreCase(order)) {
             throw new IllegalArgumentException("order 只能是 asc 或 desc");
+        }
+        // 游标是「上一页最后一条的 id」，必须为正；0/负数 meaningless，直接 400
+        if (cursor != null && cursor < 1) {
+            throw new IllegalArgumentException("cursor 需 ≥ 1");
         }
         int limit = Math.max(1, Math.min(size, 100));
         Map<String, Object> params = new HashMap<>();
@@ -566,9 +577,59 @@ public class JobService {
 
     @Transactional
     public Job updateStatus(Long id, String status) {
+        // 状态下拉/批量改状态都会走这里，必须校验枚举，避免写入任意字符串
+        if (status == null || !STATUSES.contains(status)) {
+            throw new IllegalArgumentException("岗位状态只能是 NEW / CONTACTED / SKIPPED");
+        }
         Job job = get(id);
         job.setStatus(status);
         return jobRepository.save(job);
+    }
+
+    /**
+     * 记录一次投递并更新状态（单条 / 批量共用）。
+     * 幂等：同岗位当天复用一条记录；只在成功时置 CONTACTED，失败不把 SKIPPED/CONTACTED 打回 NEW。
+     * message 由前端传入（已生成并展示的话术），此处绝不隐式调用 AI。
+     */
+    @Transactional
+    public Map<String, Object> markContacted(Long id, String message, boolean success, String failReason) {
+        Job job = get(id);
+        LocalDateTime start = LocalDate.now().atStartOfDay();
+        LocalDateTime end = start.plusDays(1);
+        var today = recordRepository.findByJobIdAndSentAtBetweenOrderBySentAtDesc(job.getId(), start, end);
+        ApplicationRecord record = today.isEmpty() ? new ApplicationRecord() : today.get(0);
+        boolean created = record.getId() == null;
+
+        record.setJobId(job.getId());
+        record.setCompany(job.getCompany());
+        record.setTitle(job.getTitle());
+        // 已有记录且本次没带话术时保留原话术，避免幂等更新把内容清空
+        if (message != null || created) {
+            record.setMessage(message);
+        }
+        record.setSuccess(success);
+        record.setFailReason(success ? null : failReason);
+        if (created) {
+            record.setSentAt(LocalDateTime.now());
+        }
+        record = recordRepository.save(record);
+
+        String current = job.getStatus();
+        if (success) {
+            updateStatus(job.getId(), "CONTACTED");
+        } else {
+            String next = nextStatusAfterFailure(current);
+            if (!java.util.Objects.equals(next, current)) {
+                updateStatus(job.getId(), next);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("recordId", record.getId());
+        result.put("success", success);
+        result.put("message", record.getMessage());
+        result.put("reused", !created);
+        return result;
     }
 
     /**

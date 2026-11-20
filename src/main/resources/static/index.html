@@ -49,6 +49,30 @@
     .rec button { margin-top: 6px; font-size: 12px; padding: 3px 8px; color: #c0392b; }
     .status-tag { white-space: nowrap; }
 
+    /* ===== P0 体验增强 ===== */
+    .toast { position: fixed; right: 20px; bottom: 20px; background: #1f6f63; color: #fff; padding: 10px 16px; border-radius: 6px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 60; border-left: 4px solid transparent; }
+    .toast.show { opacity: 1; }
+    .toast.err { background: #a93226; border-left-color: #f5c4b3; }
+    .confirm-mask { position: fixed; inset: 0; background: rgba(20,30,30,.45); display: none; align-items: center; justify-content: center; z-index: 55; padding: 20px; }
+    .confirm-box { background: #fff; border-radius: 10px; max-width: 400px; width: 100%; padding: 20px 22px; box-shadow: 0 12px 40px rgba(0,0,0,.18); }
+    .confirm-box h3 { margin: 0 0 10px; font-size: 15px; color: #1f6f63; }
+    .confirm-box p { margin: 0; font-size: 13px; color: #445; line-height: 1.6; word-break: break-word; }
+    .confirm-box .btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .confirm-box .danger { background: #c0392b; color: #fff; border-color: #c0392b; }
+    .batch-bar { display: none; gap: 8px; align-items: center; flex-wrap: wrap; background: #eef7f4; border: 1px solid #cfe6df; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
+    .batch-bar.show { display: flex; }
+    .batch-bar b { font-size: 13px; color: #1f6f63; }
+    .batch-bar select { padding: 4px 8px; font-size: 13px; }
+    th.col-sel, td.col-sel { width: 34px; text-align: center; }
+    .status-sel { padding: 3px 6px; font-size: 12px; max-width: 104px; }
+    tr.focused td { background: #eef7f4 !important; box-shadow: inset 3px 0 0 #1f6f63; }
+    .greet-edit { width: 100%; min-height: 42px; font-size: 13px; line-height: 1.5; padding: 6px 8px; border: 1px solid #cfd6dd; border-radius: 6px; resize: vertical; font-family: inherit; white-space: pre-wrap; }
+    .hist-list { margin-top: 6px; max-height: 200px; overflow: auto; border-top: 1px dashed #cfe6df; padding-top: 6px; }
+    .hist-item { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 4px 2px; border-bottom: 1px solid #eef1f4; }
+    .hist-item .hmeta { color: #889; flex: 1; }
+    .hist-item .htext { color: #445; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .kbd-hint { font-size: 11px; color: #889; }
+
     /* ===== 移动端适配：窄屏表格转卡片 ===== */
     @media (max-width: 768px) {
       header { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
@@ -107,18 +131,36 @@
     </select>
     <select id="status">
       <option value="">全部状态</option>
-      <option value="NEW">未联系</option>
-      <option value="CONTACTED">已联系</option>
+      <option value="NEW">未投递</option>
+      <option value="CONTACTED">已投递</option>
+      <option value="SKIPPED">已跳过</option>
     </select>
     <input id="q" placeholder="搜索公司 / 岗位" style="width:190px" />
     <button class="primary" onclick="applyFilter()">查询</button>
     <button onclick="resetAll()">重置</button>
     <span class="muted" id="total"></span>
+    <span class="kbd-hint" id="kbdHint">快捷键：j/k 移动 · g 生成 · c 复制 · s 已投递 · x 勾选 · / 搜索</span>
+  </div>
+
+  <div class="batch-bar" id="batchBar">
+    <b id="batchCount">已选 0 条</b>
+    <button onclick="batchGenerate()">批量生成话术</button>
+    <button onclick="batchContacted()">批量设为已投递</button>
+    <select id="batchStatusSel">
+      <option value="NEW">设为未投递</option>
+      <option value="CONTACTED">设为已投递</option>
+      <option value="SKIPPED">设为已跳过</option>
+    </select>
+    <button onclick="batchChangeStatus()">应用状态</button>
+    <button class="danger" onclick="batchDelete()">批量删除</button>
+    <button onclick="clearSelection()">取消选择</button>
+    <span class="muted" id="batchMsg"></span>
   </div>
 
   <table>
     <thead>
     <tr>
+      <th class="col-sel"><input type="checkbox" id="selAll" onchange="toggleSelectAll(this.checked)" title="全选本页"/></th>
       <th style="width:160px">公司</th>
       <th>岗位</th>
       <th style="width:150px">地点</th>
@@ -160,6 +202,19 @@
     </div>
     <div class="drawer-note">删除岗位不影响历史投递记录；成功率按当日记录计算。AI 额度账本不可删除。</div>
     <div id="recordsBox" style="font-size:13px;color:#667">加载中…</div>
+  </div>
+</div>
+
+<!-- 轻量 toast 与通用确认框 -->
+<div class="toast" id="toast"></div>
+<div class="confirm-mask" id="confirmMask">
+  <div class="confirm-box" role="dialog" aria-modal="true">
+    <h3 id="confirmTitle">确认操作</h3>
+    <p id="confirmMessage"></p>
+    <div class="btns">
+      <button id="confirmCancel">取消</button>
+      <button class="danger" id="confirmOk">确定</button>
+    </div>
   </div>
 </div>
 
@@ -270,7 +325,14 @@
     data.items.forEach(job => {
       const loc = [job.province, job.city, job.district].filter(Boolean).join(' / ') || job.rawLocation || '';
       const tr = document.createElement('tr');
+      const st = job.status === 'CONTACTED'
+        ? { label: '已投递', bg: '#e6f0ff' }
+        : job.status === 'SKIPPED'
+          ? { label: '已跳过', bg: '#eef1f4' }
+          : { label: '未投递', bg: '#e8f3f0' };
+      tr.dataset.jobId = job.id;
       tr.innerHTML = `
+        <td class="col-sel"><input type="checkbox" class="job-sel" data-id="${job.id}" onchange="syncSelection()"/></td>
         <td data-label="公司">${esc(job.company)}</td>
         <td data-label="岗位">${esc(job.title)}${job.category === 'FULLTIME' ? ' <span class="tag" style="background:#fdeeee;color:#b33">社招</span>' : ''}<div class="muted">${esc(job.skills || '')}</div></td>
         <td data-label="地点">${esc(loc)}</td>
@@ -279,10 +341,14 @@
         <td data-label="最低日薪">${job.dailyMin ? job.dailyMin : '<span class="muted">-</span>'}</td>
         <td data-label="最高日薪">${job.dailyMax ? job.dailyMax : '<span class="muted">-</span>'}</td>
         <td class="muted" data-label="薪资原文">${esc(job.salary || '-')}</td>
-        <td data-label="状态"><span class="tag status-tag" style="background:${job.status === 'CONTACTED' ? '#e6f0ff' : '#e8f3f0'}">${job.status === 'CONTACTED' ? '已联系' : '未联系'}</span></td>
+        <td data-label="状态"><span class="tag status-tag" style="background:${st.bg}">${st.label}</span></td>
         <td data-label="操作">
           <button onclick="gen(${job.id})">生成话术</button>
-          <button onclick="contacted(${job.id})">标记已投</button>
+          <select class="status-sel" data-id="${job.id}" data-prev="${job.status || 'NEW'}" onchange="changeStatus(${job.id}, this.value)" title="更改投递状态">
+            <option value="NEW" ${job.status !== 'CONTACTED' && job.status !== 'SKIPPED' ? 'selected' : ''}>未投递</option>
+            <option value="CONTACTED" ${job.status === 'CONTACTED' ? 'selected' : ''}>已投递</option>
+            <option value="SKIPPED" ${job.status === 'SKIPPED' ? 'selected' : ''}>已跳过</option>
+          </select>
           <button onclick="location.href='/form.html?id=${job.id}'">编辑</button>
           <button class="btn-del" data-id="${job.id}" data-company="${esc(job.company)}" data-title="${esc(job.title)}" style="color:#c0392b;border-color:#e0b4ae">删除</button>
           ${safeUrl(job.url) ? `<a href="${esc(safeUrl(job.url))}" target="_blank" rel="noopener noreferrer" style="font-size:12px;margin-left:6px">打开</a>` : ''}
@@ -294,7 +360,7 @@
       trG.id = 'gr-' + job.id;
       trG.style.display = 'none';
       trG.className = 'greet-row';
-      trG.innerHTML = `<td colspan="10" style="padding:0 12px 3px 12px"><div class="greet" id="g-${job.id}"></div></td>`;
+      trG.innerHTML = `<td colspan="11" style="padding:0 12px 3px 12px"><div class="greet" id="g-${job.id}"></div></td>`;
       rows.appendChild(trG);
     });
     refreshStats();
@@ -326,8 +392,8 @@
   function jumpPage() {
     const input = document.getElementById('jumpPage');
     let target = parseInt(input.value, 10);
-    if (isNaN(target) || target < 1) { alert('请输入正确的页码'); return; }
-    if (target > totalPages) { alert('超出范围，共 ' + totalPages + ' 页'); return; }
+    if (isNaN(target) || target < 1) { toast('请输入正确的页码', 'err'); return; }
+    if (target > totalPages) { toast('超出范围，共 ' + totalPages + ' 页', 'err'); return; }
     pageNo = target;
     load(false, true);
     input.value = '';
@@ -385,14 +451,69 @@
         <span class="muted">引擎：${esc(g.engine || 'RULE')}${g.templateId ? ' · 模板：' + esc(g.templateId) : ''}</span>
       </div>
       ${alertHtml}
-      <div style="margin-top:2px">${esc(g.message)}</div>
+      <textarea class="greet-edit" id="msg-${id}" oninput="onGreetEdit(${id})" title="可直接编辑；标记已投时保存编辑后的文本">${esc(g.message)}</textarea>
       <div class="muted" style="margin-top:1px">建议：${esc(g.advice || '')}</div>
       ${otherHtml}
-      <div style="margin-top:2px; display:flex; align-items:center; gap:8px">
+      <div style="margin-top:2px; display:flex; align-items:center; gap:8px; flex-wrap:wrap">
         <button onclick="copyGreet(${id})">复制</button>
+        <button onclick="saveGreet(${id})">保存编辑</button>
+        <button onclick="toggleHistory(${id})">历史</button>
         <button onclick="collapseGreet(${id})">收起</button>
         <button id="regen-${id}" onclick="regenGreet(${id})">重新生成</button>
-      </div>`;
+      </div>
+      <div class="hist-list" id="hist-${id}" style="display:none"></div>`;
+  }
+
+  // 编辑时同步 dataset.message，使「标记已投」保存编辑后的文本；事实字段（月数/天数/方向）不受影响
+  function onGreetEdit(id) {
+    const box = document.getElementById('g-' + id);
+    const ta = document.getElementById('msg-' + id);
+    if (box && ta) box.dataset.message = ta.value;
+  }
+
+  async function saveGreet(id) {
+    const ta = document.getElementById('msg-' + id);
+    if (!ta) return;
+    try {
+      const d = await api('/api/jobs/' + id + '/greeting', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: ta.value })
+      });
+      toast('已保存为历史版本（' + d.length + ' 字）');
+    } catch (e) { toast('保存失败：' + e.message, 'err'); }
+  }
+
+  async function toggleHistory(id) {
+    const box = document.getElementById('hist-' + id);
+    if (!box) return;
+    if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    box.textContent = '加载中…';
+    try {
+      const list = await api('/api/jobs/' + id + '/greetings');
+      if (!list.length) { box.textContent = '暂无历史版本'; return; }
+      box.innerHTML = list.map(v => `
+        <div class="hist-item">
+          <span class="hmeta">${esc(String(v.createdAt || '').replace('T', ' ').slice(0, 16))} · ${esc(v.source || v.engine || '-')} · ${(v.message || '').length}字</span>
+          <span class="htext" title="${esc(v.message || '')}">${esc(v.message || '')}</span>
+          <button onclick="useVersion(${id}, ${v.id})">选用</button>
+        </div>`).join('');
+    } catch (e) { box.textContent = '读取失败：' + e.message; }
+  }
+
+  // 选用历史版本：纯前端行为，把该版本文本填回编辑框并同步 dataset.message
+  function useVersion(id, versionId) {
+    const box = document.getElementById('hist-' + id);
+    const ta = document.getElementById('msg-' + id);
+    if (!box || !ta) return;
+    const btn = box.querySelector('button[onclick="useVersion(' + id + ',' + versionId + ')"]');
+    const row = btn ? btn.closest('.hist-item') : null;
+    const textEl = row ? row.querySelector('.htext') : null;
+    if (!textEl) return;
+    const text = textEl.getAttribute('title') || '';
+    ta.value = text;
+    onGreetEdit(id);
+    toast('已选用该版本，可继续编辑');
   }
 
   async function fetchGreet(id, force) {
@@ -411,7 +532,7 @@
       wrap.style.display = '';
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = '重新生成'; }
-      alert('生成话术失败：' + e.message);
+      toast('生成话术失败：' + e.message, 'err');
     }
   }
 
@@ -435,28 +556,61 @@
     if (wrap) wrap.style.display = 'none';
   }
 
-  async function contacted(id) {
-    // 只把用户已经看到的那份话术存进投递记录；没有生成过就传空，不在后端隐式生成。
+  // 状态下拉变更：已投递走 contacted（附带话术写记录），未投递/已跳过只改状态不动投递记录
+  async function changeStatus(id, status) {
+    const sel = document.querySelector(`.status-sel[data-id="${id}"]`);
+    const before = sel ? sel.dataset.prev : null;
+    try {
+      if (status === 'CONTACTED') {
+        await contacted(id, false);
+      } else {
+        const res = await fetch(`/api/jobs/${id}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status })
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error(d.message || res.status);
+        }
+        toast('状态已更新');
+        await load(false, !!sortField);
+      }
+      if (sel) sel.dataset.prev = status;
+    } catch (e) {
+      toast('状态更新失败：' + e.message, 'err');
+      // 失败时把下拉还原到变更前的状态
+      if (sel && before) sel.value = before;
+      else await load(false, !!sortField);
+    }
+  }
+
+  // 标记为已投递：只把用户已看到的话术存进记录，不在后端隐式生成
+  async function contacted(id, notify = true) {
     const box = document.getElementById('g-' + id);
     const message = box ? (box.dataset.message || '') : '';
     const res = await fetch(`/api/jobs/${id}/contacted`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message })
     });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.message || res.status);
+    }
     const r = await res.json();
-    alert(r.success ? '已记录投递' : '记录失败');
-    load(false, !!sortField);
+    if (notify) { toast(r.reused ? '已更新今日投递记录' : '已记录投递'); await load(false, !!sortField); }
+    return r;
   }
 
   async function removeJob(id, company, title) {
-    if (!confirm(`确定删除「${company} / ${title}」吗？\n删除后不可恢复。`)) return;
+    const ok = await confirmBox('删除岗位', `确定删除「${company} / ${title}」吗？删除后不可恢复，但历史投递记录会保留。`);
+    if (!ok) return;
     const res = await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
     if (res.ok) {
-      alert('已删除');
+      toast('已删除');
       load(false, !!sortField);
     } else {
       const d = await res.json().catch(() => ({}));
-      alert('删除失败：' + (d.message || res.status));
+      toast('删除失败：' + (d.message || res.status), 'err');
     }
   }
 
@@ -469,11 +623,31 @@
   });
 
   function copyGreet(id) {
+    // 优先读编辑框当前值（用户可能已手动修改），与 dataset.message 保持同步
+    const ta = document.getElementById('msg-' + id);
     const box = document.getElementById('g-' + id);
-    if (box) copyText(box.dataset.message || '');
+    const text = ta ? ta.value : (box ? (box.dataset.message || '') : '');
+    copyText(text);
   }
 
-  function copyText(text) { navigator.clipboard.writeText(text).then(() => alert('已复制到剪贴板')); }
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('已复制到剪贴板');
+    } catch (e) {
+      // 非 HTTPS / 局域网场景 navigator.clipboard 不可用，回退到 execCommand
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (_) { /* ignore */ }
+      document.body.removeChild(ta);
+      ok ? toast('已复制到剪贴板') : toast('复制失败，请手动选择文本', 'err');
+    }
+  }
 
   async function refreshStats() {
     const d = await api('/api/stats');
@@ -482,7 +656,7 @@
       `<span>今日已投 <b>${o.todaySuccess}</b> 家</span>
        <span title="按投递记录累计，不受岗位删除影响">累计成功 <b>${o.totalSuccess}</b></span>
        <span title="按当日投递记录计算">今日成功率 <b>${o.successRate}%</b></span>
-       <span>岗位库 <b>${o.jobTotal}</b>（未联系 ${o.jobNew}）</span>
+       <span>岗位库 <b>${o.jobTotal}</b>（未投递 ${o.jobNew}）</span>
        <span class="sync" id="sync"></span>`;
     try {
       const last = await api('/api/import/latest');
@@ -503,6 +677,172 @@
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
+
+  // ===== P0-1：toast 与通用确认框 =====
+  function toast(msg, type) {
+    const t = document.getElementById('toast');
+    t.className = 'toast show' + (type === 'err' ? ' err' : '');
+    t.textContent = msg;
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  let confirmResolve = null;
+  function confirmBox(title, message) {
+    return new Promise(resolve => {
+      confirmResolve = resolve;
+      // 用 textContent 写入，避免公司/岗位名进入 HTML 解析（延续 XSS 防护）
+      document.getElementById('confirmTitle').textContent = title;
+      document.getElementById('confirmMessage').textContent = message;
+      document.getElementById('confirmMask').style.display = 'flex';
+    });
+  }
+  function closeConfirm(result) {
+    document.getElementById('confirmMask').style.display = 'none';
+    const r = confirmResolve;
+    confirmResolve = null;
+    if (r) r(result);
+  }
+  document.getElementById('confirmOk').addEventListener('click', () => closeConfirm(true));
+  document.getElementById('confirmCancel').addEventListener('click', () => closeConfirm(false));
+  document.getElementById('confirmMask').addEventListener('click', e => {
+    if (e.target === document.getElementById('confirmMask')) closeConfirm(false);
+  });
+
+  // ===== P0-2：批量选择 =====
+  function selectedIds() {
+    return Array.from(document.querySelectorAll('.job-sel:checked')).map(c => Number(c.dataset.id));
+  }
+  function syncSelection() {
+    const ids = selectedIds();
+    document.getElementById('batchBar').classList.toggle('show', ids.length > 0);
+    document.getElementById('batchCount').textContent = '已选 ' + ids.length + ' 条';
+    const all = document.querySelectorAll('.job-sel');
+    const selAll = document.getElementById('selAll');
+    if (selAll) selAll.checked = all.length > 0 && ids.length === all.length;
+  }
+  function toggleSelectAll(checked) {
+    document.querySelectorAll('.job-sel').forEach(c => { c.checked = checked; });
+    syncSelection();
+  }
+  function clearSelection() {
+    document.querySelectorAll('.job-sel').forEach(c => { c.checked = false; });
+    const selAll = document.getElementById('selAll');
+    if (selAll) selAll.checked = false;
+    syncSelection();
+  }
+
+  async function batchCall(url, body, okMsg) {
+    try {
+      const d = await api(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      toast(okMsg(d));
+      clearSelection();
+      await load(false, !!sortField);
+      return d;
+    } catch (e) { toast('批量操作失败：' + e.message, 'err'); return null; }
+  }
+
+  async function batchGenerate() {
+    const ids = selectedIds();
+    if (!ids.length) return;
+    const ok = await confirmBox('批量生成话术', `将对选中的 ${ids.length} 条岗位生成话术。${ids.length > 10 ? 'AI 模式单次上限 10 条，RULE 模式 30 条；超限会被拒绝。' : 'AI 模式会消耗额度。'}`);
+    if (!ok) return;
+    const btnMsg = document.getElementById('batchMsg');
+    btnMsg.textContent = '生成中…';
+    const d = await batchCall('/api/jobs/batch/greeting', { ids }, r => {
+      const okN = Object.keys(r.results || {}).length;
+      const errN = Object.keys(r.errors || {}).length;
+      return `生成完成：${okN} 条成功${errN ? '，' + errN + ' 条失败' : ''}`;
+    });
+    btnMsg.textContent = '';
+    // 把生成结果渲染到对应面板
+    if (d && d.results) {
+      Object.entries(d.results).forEach(([id, g]) => {
+        const wrap = document.getElementById('gr-' + id);
+        if (wrap) wrap.style.display = '';
+        renderGreet(id, g);
+      });
+    }
+  }
+
+  async function batchContacted() {
+    const ids = selectedIds();
+    if (!ids.length) return;
+    const ok = await confirmBox('批量设为已投递', `将选中的 ${ids.length} 条岗位标记为已投递，并记录当前已生成的话术（未生成的不补生成）。`);
+    if (!ok) return;
+    const items = ids.map(id => {
+      const box = document.getElementById('g-' + id);
+      return { id: String(id), message: box ? (box.dataset.message || '') : '' };
+    });
+    await batchCall('/api/jobs/batch/contacted', items, r => `已记录 ${r.marked} 条投递`);
+  }
+
+  async function batchChangeStatus() {
+    const ids = selectedIds();
+    if (!ids.length) return;
+    const status = document.getElementById('batchStatusSel').value;
+    const label = status === 'NEW' ? '未投递' : status === 'CONTACTED' ? '已投递' : '已跳过';
+    const ok = await confirmBox('批量改状态', `将选中的 ${ids.length} 条岗位设为「${label}」？已有投递记录不受影响。`);
+    if (!ok) return;
+    await batchCall('/api/jobs/batch/status', { ids, status }, r => `已更新 ${r.changed} 条状态`);
+  }
+
+  async function batchDelete() {
+    const ids = selectedIds();
+    if (!ids.length) return;
+    const ok = await confirmBox('批量删除', `确定删除选中的 ${ids.length} 条岗位吗？此为软删除，历史投递记录保留。`);
+    if (!ok) return;
+    await batchCall('/api/jobs/batch/delete', { ids }, r => `已删除 ${r.deleted} 条岗位`);
+  }
+
+  // ===== P0-3：键盘快捷键 =====
+  let focusId = null;
+  function setFocus(id) {
+    focusId = id;
+    document.querySelectorAll('tr.focused').forEach(tr => tr.classList.remove('focused'));
+    const tr = document.querySelector(`#rows tr[data-job-id="${id}"]`);
+    if (tr) {
+      tr.classList.add('focused');
+      tr.scrollIntoView({ block: 'nearest' });
+    }
+  }
+  function focusableIds() {
+    return Array.from(document.querySelectorAll('.job-sel')).map(c => Number(c.dataset.id));
+  }
+  function moveFocus(delta) {
+    const ids = focusableIds();
+    if (!ids.length) return;
+    const idx = ids.indexOf(focusId);
+    const next = idx < 0 ? (delta > 0 ? 0 : ids.length - 1)
+      : Math.max(0, Math.min(ids.length - 1, idx + delta));
+    setFocus(ids[next]);
+  }
+  document.addEventListener('keydown', e => {
+    const tag = (e.target && e.target.tagName) || '';
+    if (['INPUT', 'SELECT', 'TEXTAREA'].includes(tag) || e.ctrlKey || e.metaKey || e.altKey) return;
+    // 确认框/抽屉打开时不响应业务快捷键
+    if (document.getElementById('confirmMask').style.display === 'flex') return;
+    switch (e.key) {
+      case 'j': e.preventDefault(); moveFocus(1); break;
+      case 'k': e.preventDefault(); moveFocus(-1); break;
+      case 'g': if (focusId != null) { e.preventDefault(); gen(focusId); } break;
+      case 'c': if (focusId != null) { e.preventDefault(); copyGreet(focusId); } break;
+      case 's': if (focusId != null) {
+        e.preventDefault();
+        const sel = document.querySelector(`.status-sel[data-id="${focusId}"]`);
+        if (sel) { sel.value = 'CONTACTED'; changeStatus(focusId, 'CONTACTED'); }
+      } break;
+      case 'x': if (focusId != null) {
+        e.preventDefault();
+        const c = document.querySelector(`.job-sel[data-id="${focusId}"]`);
+        if (c) { c.checked = !c.checked; syncSelection(); }
+      } break;
+      case '/': e.preventDefault(); document.getElementById('q').focus(); break;
+      default: break;
+    }
+  });
 
   // ===== 投递记录抽屉 =====
   function openRecords() {
@@ -530,18 +870,28 @@
     } catch (e) { box.textContent = '读取失败：' + e.message; }
   }
   async function deleteRecord(id) {
-    if (!confirm('确定删除这条投递记录吗？此操作不影响 AI 额度账本。')) return;
+    const ok = await confirmBox('删除投递记录', '确定删除这条投递记录吗？此操作不影响 AI 额度账本。');
+    if (!ok) return;
     try {
-      await fetch(`/api/stats/recent/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/stats/recent/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.message || res.status);
+      }
+      toast('已删除');
       await loadRecords();
       await refreshStats();
-    } catch (e) { alert('删除失败：' + e.message); }
+    } catch (e) { toast('删除失败：' + e.message, 'err'); }
   }
   document.addEventListener('DOMContentLoaded', function () {
     const mask = document.getElementById('recordsMask');
     mask.addEventListener('click', function (e) { if (e.target === mask) closeRecords(); });
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && mask.style.display === 'flex') closeRecords();
+      if (e.key !== 'Escape') return;
+      // 确认框优先响应
+      const cm = document.getElementById('confirmMask');
+      if (cm.style.display === 'flex') { closeConfirm(false); return; }
+      if (mask.style.display === 'flex') closeRecords();
     });
   });
 

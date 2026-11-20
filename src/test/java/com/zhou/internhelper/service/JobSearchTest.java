@@ -54,7 +54,11 @@ class JobSearchTest {
                     default -> null;
                 });
 
-        service = new JobService(repo, new RegionCatalog(), new MetaParser(), em);
+        service = new JobService(repo, new RegionCatalog(), new MetaParser(), em,
+                (com.zhou.internhelper.repository.ApplicationRecordRepository) Proxy.newProxyInstance(
+                        com.zhou.internhelper.repository.ApplicationRecordRepository.class.getClassLoader(),
+                        new Class<?>[]{com.zhou.internhelper.repository.ApplicationRecordRepository.class},
+                        (p, m, a) -> "toString".equals(m.getName()) ? "RecordRepoStub" : null));
     }
 
     private void searchWithQ(String q) {
@@ -96,5 +100,21 @@ class JobSearchTest {
     void 合法排序参数与旧别名仍通过() {
         assertDoesNotThrow(() ->
                 service.search(null, null, null, null, null, null, null, 1, "dailyPay", "ASC", 15));
+    }
+
+    @Test
+    void 非法游标被拒绝() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service.search(null, null, null, null, null, null, 0L, null, null, null, 15),
+                "cursor=0 应 400");
+        assertThrows(IllegalArgumentException.class,
+                () -> service.search(null, null, null, null, null, null, -1L, null, null, null, 15),
+                "cursor=-1 应 400");
+    }
+
+    @Test
+    void 合法游标仍通过() {
+        assertDoesNotThrow(() ->
+                service.search(null, null, null, null, null, null, 100L, null, null, null, 15));
     }
 }
