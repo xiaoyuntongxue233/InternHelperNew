@@ -133,10 +133,14 @@ public class GreetingService {
         return generateWithAi(job, facts, rendered.templateId(), draft, s);
     }
 
-    /** AI 自由生成：无模板草稿，直接让模型根据个人资料创作 */
+    /**
+     * AI 自由生成（新架构）：模型只设计「表达骨架」，不接触任何真实事实值。
+     * 流程：骨架提示词（无事实） → 模型输出带占位符的骨架 → 结构校验 → 后端确定性回填事实 → 事实校验。
+     * 攻击面从源头收敛：模型没有机会写出某个具体学校/技能/数字；词典与事实校验保留为最后一道网。
+     */
     private Greeting generateFreeWithAi(Job job, Facts facts, String fallbackDraft, SettingsSnapshot s) {
         List<String> warnings = new ArrayList<>();
-        String prompt = aiClient.buildFreeUserPrompt(facts.variables(), facts.style(), facts.minLen(), facts.maxLen());
+        String prompt = aiClient.buildSkeletonUserPrompt(facts.style(), facts.minLen(), facts.maxLen());
         BigDecimal estimate = quota.estimateCost(prompt);
 
         // 预检 + 并发预留；返回 null 表示拒绝调用
@@ -148,7 +152,19 @@ public class GreetingService {
 
         try {
             AiGreetingClient.AiResult result = aiClient.createFree(prompt);
-            Validation validation = validate(result.message(), facts);
+            // 第一道闸门：骨架里只能是白名单占位符 + 连接词
+            GreetingValidator.Result skeletonCheck = validator.validateSkeleton(
+                    result.message(), AiGreetingClient.SKELETON_SLOTS, AiGreetingClient.SKELETON_REQUIRED_SLOTS);
+            if (!skeletonCheck.ok()) {
+                quota.release(reserved);
+                warnings.addAll(skeletonCheck.warnings());
+                warnings.add("模型输出未通过骨架校验。");
+                return finishAi(fallbackDraft, facts, "free", warnings, false, s);
+            }
+            // 后端回填：所有事实来自确定性变量，模型无权决定具体值
+            String filled = templateService.renderText(result.message(), facts.variables());
+            // 第二道闸门：回填后仍跑一次事实校验（词典兜底），确保连接词没有夹带未提供的技术词
+            Validation validation = validate(filled, facts);
             warnings.addAll(validation.warnings());
             if (!validation.ok()) {
                 quota.release(reserved);
@@ -158,7 +174,7 @@ public class GreetingService {
             quota.charge(job.getId(), "free", result.promptTokens(), result.cacheHitTokens(),
                     result.completionTokens(), result.usageReported(), estimate, greetingProperties.getPromptVersion());
             quota.release(reserved);
-            return new Greeting(result.message(), facts.direction(), facts.months(), facts.days(),
+            return new Greeting(filled, facts.direction(), facts.months(), facts.days(),
                     ADVICE, "AI", "free", warnings, false);
         } catch (Exception e) {
             quota.release(reserved);

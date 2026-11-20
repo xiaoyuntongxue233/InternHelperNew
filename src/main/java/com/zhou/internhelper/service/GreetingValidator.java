@@ -31,6 +31,11 @@ public final class GreetingValidator {
     private static final Pattern DAY_OUT = Pattern.compile(
             "(?:每周|每)\\s*(?:出勤)?\\s*(\\d+)\\s*天|(\\d+)\\s*天\\s*/\\s*周");
 
+    /** 骨架占位符：{{name}} */
+    private static final Pattern SLOT = Pattern.compile("\\{\\{\\s*([a-zA-Z][a-zA-Z0-9]*)\\s*\\}\\}");
+    /** 骨架里不应出现模型自己写死的「数字+个月 / 数字+天」 */
+    private static final Pattern LITERAL_SCHEDULE = Pattern.compile("\\d+\\s*(?:个月|天)");
+
     private static final int ABS_MAX_MONTHS = 12;
     private static final int ABS_MAX_DAYS = 7;
 
@@ -81,6 +86,38 @@ public final class GreetingValidator {
         public static Result fail(String reason) {
             return new Result(false, List.of(reason));
         }
+    }
+
+    /**
+     * 校验「表达骨架」结构：只允许白名单占位符、必须含事实槽位、不得写死月数/天数。
+     * 这是新架构的第一道闸门——模型不产出事实，只产出带占位符的句子骨架，
+     * 占位符由后端用确定性事实值回填。任何偷写/漏写都在此拦截并回退模板。
+     */
+    public Result validateSkeleton(String skeleton, Set<String> allowedSlots, Set<String> requiredSlots) {
+        if (skeleton == null || skeleton.isBlank()) {
+            return Result.fail("模型输出的骨架为空");
+        }
+        Matcher m = SLOT.matcher(skeleton);
+        Set<String> found = new LinkedHashSet<>();
+        while (m.find()) {
+            found.add(m.group(1));
+        }
+        for (String slot : found) {
+            if (!allowedSlots.contains(slot)) {
+                return Result.fail("骨架包含未知占位符：" + slot);
+            }
+        }
+        for (String required : requiredSlots) {
+            if (!found.contains(required)) {
+                return Result.fail("骨架缺少必要事实占位符：" + required);
+            }
+        }
+        // 去掉占位符后若还有「N个月 / N天」数字事实，说明模型偷写了数字
+        String withoutSlots = skeleton.replaceAll("\\{\\{\\s*[a-zA-Z][a-zA-Z0-9]*\\s*\\}\\}", "");
+        if (LITERAL_SCHEDULE.matcher(withoutSlots).find()) {
+            return Result.fail("骨架不得写死月数/天数，必须使用占位符");
+        }
+        return Result.pass(List.of());
     }
 
     /**

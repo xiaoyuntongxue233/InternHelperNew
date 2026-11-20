@@ -55,6 +55,10 @@ class JobServiceTest {
             }
             case "findById":
                 return Optional.ofNullable(store.get(args[0]));
+            case "findByIdAndDeletedFalse": {
+                Job job = store.get(args[0]);
+                return job != null && !job.isDeleted() ? Optional.of(job) : Optional.empty();
+            }
             case "findByTitleHashAndDeletedFalse": {
                 String hash = (String) args[0];
                 return store.values().stream()
@@ -199,6 +203,56 @@ class JobServiceTest {
         Job rebuilt = assertDoesNotThrow(() -> service.create(newJob("腾讯", "岗位A")));
         assertNotNull(rebuilt.getTitleHash());
         assertEquals(oldHash, rebuilt.getTitleHash(), "同名重建后哈希应与原值一致");
+    }
+
+    @Test
+    void 软删岗位对业务入口不可见() {
+        Job a = service.create(newJob("腾讯", "岗位A"));
+        service.delete(a.getId());
+        assertThrows(IllegalArgumentException.class, () -> service.get(a.getId()),
+                "软删岗位应视为不存在");
+        assertThrows(IllegalArgumentException.class,
+                () -> service.update(a.getId(), newJob("腾讯", "岗位B")),
+                "软删岗位不可编辑");
+    }
+
+    @Test
+    void 编辑软删岗位不会重设哈希() {
+        Job a = service.create(newJob("腾讯", "岗位A"));
+        Long id = a.getId();
+        assertNotNull(a.getTitleHash(), "创建后应有哈希");
+        service.delete(id);
+        assertNull(store.get(id).getTitleHash(), "删除后哈希应被清空");
+        Job patch = new Job();
+        patch.setTitle("改名尝试");
+        assertThrows(IllegalArgumentException.class, () -> service.update(id, patch));
+        assertNull(store.get(id).getTitleHash(), "编辑被拒后哈希仍应为空，不占用唯一键");
+        assertEquals("岗位A", store.get(id).getTitle(), "编辑被拒后标题不应被修改");
+    }
+
+    @Test
+    void 导入跳过非法条目不中断整批() {
+        Job good = newJob("字节", "Java实习");
+        Job badMonths = newJob("腾讯", "后端实习");
+        badMonths.setMonths(999);
+        Job badDays = newJob("阿里", "前端实习");
+        badDays.setDays(20);
+        Job badStatus = newJob("美团", "测试实习");
+        badStatus.setStatus("UNKNOWN");
+
+        int added = service.importJobs(java.util.List.of(good, badMonths, badDays, badStatus));
+
+        assertEquals(1, added, "只有合法条目入库");
+        assertEquals(1, store.values().stream().filter(j -> !j.isDeleted()).count());
+        assertTrue(store.values().stream().anyMatch(j -> "字节".equals(j.getCompany())));
+    }
+
+    @Test
+    void 投递失败不应把SKIPPED打回NEW() {
+        assertEquals("SKIPPED", service.nextStatusAfterFailure("SKIPPED"));
+        assertEquals("CONTACTED", service.nextStatusAfterFailure("CONTACTED"));
+        assertEquals("NEW", service.nextStatusAfterFailure("NEW"));
+        assertEquals("NEW", service.nextStatusAfterFailure(null), "历史脏数据 null 归一为 NEW");
     }
 
     @Test

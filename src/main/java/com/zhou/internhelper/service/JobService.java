@@ -164,9 +164,10 @@ public class JobService {
         return query.getResultList();
     }
 
+    /** 业务入口统一走这里：软删岗位对外视为不存在 */
     public Job get(Long id) {
-        return jobRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("岗位不存在：" + id));
+        return jobRepository.findByIdAndDeletedFalse(id)
+                .orElseThrow(() -> new IllegalArgumentException("岗位不存在或已删除：" + id));
     }
 
     private static final Set<String> STATUSES = Set.of("NEW", "CONTACTED", "SKIPPED");
@@ -223,6 +224,11 @@ public class JobService {
     public Job update(Long id, Job patch) {
         validateJob(patch, true);
         Job job = get(id);
+        // 纵深防御：即便入口已过滤软删，这里再挡一次，避免将来改用 findById 时
+        // 让软删岗位重设 titleHash、重新占用唯一键
+        if (job.isDeleted()) {
+            throw new IllegalArgumentException("已删除的岗位不能编辑");
+        }
         if (patch.getCompany() != null) job.setCompany(patch.getCompany());
         if (patch.getTitle() != null) job.setTitle(patch.getTitle());
         // 改名后重新查重（排除自身）：堵住编辑绕过去重
@@ -282,12 +288,16 @@ public class JobService {
         jobRepository.save(job);
     }
 
-    /** 导入：按 公司+岗位 去重（含哈希），顺便拆地点、抽时长和日薪 */
+    /** 导入：按 公司+岗位 去重（含哈希），顺便拆地点、抽时长和日薪。
+     *  与 create 不同：坏数据（非法枚举/越界月数天数）只跳过该条并记 warn，不中断整批。 */
     @Transactional
     public int importJobs(List<Job> jobs) {
         int added = 0;
         for (Job job : jobs) {
-            if (job.getCompany() == null || job.getTitle() == null) {
+            try {
+                validateJob(job, false);
+            } catch (IllegalArgumentException e) {
+                log.warn("跳过非法导入岗位 {} / {}：{}", job.getCompany(), job.getTitle(), e.getMessage());
                 continue;
             }
             String hash = titleHash(job.getCompany(), job.getTitle());
@@ -528,6 +538,18 @@ public class JobService {
         Job job = get(id);
         job.setStatus(status);
         return jobRepository.save(job);
+    }
+
+    /**
+     * 标记投递「失败」后的状态决策（纯逻辑，便于契约测试）。
+     * 只有当前是 NEW 或历史脏数据 null 时才归一为 NEW；
+     * SKIPPED / CONTACTED 一律保持不变，失败不得把已跳过/已联系的岗位打回 NEW。
+     */
+    public String nextStatusAfterFailure(String current) {
+        if (current == null || "NEW".equals(current)) {
+            return "NEW";
+        }
+        return current;
     }
 
     public long countByStatus(String status) {

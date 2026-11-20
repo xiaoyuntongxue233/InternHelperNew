@@ -59,6 +59,26 @@ public class GreetingTemplateService {
         return new Rendered(template.id(), text);
     }
 
+    /**
+     * 渲染任意文本中的事实占位符（供 AI 骨架回填使用）。
+     * 与 {@link #render(String, Map)} 的区别：模板来自模型而非内置文件，
+     * 因此仅做「占位符 → 后端确定性事实值」的替换，不对值做二次解释。
+     * 未知占位符原样保留，交由上层校验器拦截。
+     */
+    public String renderText(String text, Map<String, String> variables) {
+        if (text == null) {
+            return "";
+        }
+        String result = text;
+        if (variables != null) {
+            for (Map.Entry<String, String> e : variables.entrySet()) {
+                String value = e.getValue() == null ? "" : e.getValue();
+                result = result.replace("{{" + e.getKey() + "}}", value);
+            }
+        }
+        return result;
+    }
+
     public record Template(String id, String content) {
     }
 

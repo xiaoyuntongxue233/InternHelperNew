@@ -16,6 +16,7 @@ import org.springframework.web.client.RestClient;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 模型调用封装。当前默认使用 DeepSeek，但不绑定厂商专有 SDK，只依赖通用 HTTP 接口。
@@ -31,12 +32,30 @@ public class AiGreetingClient {
             "必须保持学校、学历、专业、技能句、实习月数、每周出勤天数、到岗时间与原文一致。" +
             "不要输出解释，只输出 JSON，格式为 {\"message\":\"润色后的话术\"}。";
 
-    public static final String FREE_SYSTEM_PROMPT =
-            "你是一位求职打招呼文案创作助手。根据提供的个人资料与岗位信息，直接写一段自然的打招呼话术。" +
-            "只能使用资料里明确给出的事实，不得编造学校、学历、专业、技能、项目、实习月数或到岗时间。" +
-            "话术中必须体现给定的实习月数与每周出勤天数，且不超过硬上限 12 个月、每周 7 天。" +
-            "月数与天数必须用阿拉伯数字书写（例如 3 个月、每周 4 天），不要写成“三个月”等中文数字。" +
-            "不要输出建议文案，不要输出解释，只输出 JSON，格式为 {\"message\":\"话术正文\"}。";
+    /**
+     * 自由生成的「表达骨架」系统提示词。
+     *
+     * <p>架构原则：事实字段不由模型生成。模型看不到任何真实事实值，只拿到一组占位符名称，
+     * 负责组织语序与连接词；所有事实由后端在渲染阶段用确定性占位符回填。
+     * 这样攻击面从源头收敛——模型没有机会写出某个具体学校/技能/数字。</p>
+     */
+    public static final String SKELETON_SYSTEM_PROMPT =
+            "你是一位求职打招呼文案的表达设计助手。你的任务不是写事实，而是设计一段话术的“表达骨架”。" +
+            "你会拿到一组占位符（形如 {{school}}、{{skillClause}}），请把它们像积木一样安排进自然通顺的句子里，" +
+            "只负责补充礼貌用语、连接词和语气，绝不替换、改写或解释占位符本身。" +
+            "严禁输出占位符清单以外的任何具体事实：不得写出学校名、学历、专业、技能/技术名词、" +
+            "项目、实习月数、每周天数、到岗时间、公司名、岗位名；这些一律用给定占位符表示。" +
+            "不要输出解释，只输出 JSON，格式为 {\"message\":\"表达骨架\"}。";
+
+    /** 骨架允许出现的占位符白名单，与 GreetingService.buildFacts 的事实变量一一对应 */
+    public static final Set<String> SKELETON_SLOTS = Set.of(
+            "school", "schoolShort", "grade", "degreeLabel", "majorClause", "nameClause",
+            "skillClause", "direction", "months", "days", "startFromClause", "aiPart",
+            "company", "title");
+
+    /** 骨架必须包含的最小事实槽位，缺失即视为模型偷写/漏写事实 */
+    public static final Set<String> SKELETON_REQUIRED_SLOTS = Set.of(
+            "school", "degreeLabel", "skillClause", "months", "days");
 
     /** 测试连接用的最小提示词，短小且固定，便于精确预估成本 */
     public static final String TEST_PROMPT = "ping";
@@ -69,41 +88,50 @@ public class AiGreetingClient {
                 + "草稿：\n" + nullToEmpty(draft);
     }
 
-    /** 自由生成提示词：不使用模板草稿，直接把结构化资料交给 AI 创作 */
-    public String buildFreeUserPrompt(Map<String, String> v, String style, Integer minLen, Integer maxLen) {
+    /**
+     * 自由生成的「表达骨架」提示词（新架构）。
+     *
+     * <p>关键差异：这里完全不传入任何真实事实值（学校、技能、月数、天数等），
+     * 只给出占位符名称、含义和必须包含的最小集合。模型无从编造，事实由后端回填。
+     * 提示词结构保持固定且简短，成本预估也更稳定。</p>
+     */
+    public String buildSkeletonUserPrompt(String style, Integer minLen, Integer maxLen) {
         int lo = Math.max(1, minLen == null ? 55 : minLen);
         int hi = Math.max(lo, maxLen == null ? 110 : maxLen);
         String styleText = "formal".equalsIgnoreCase(style) ? "正式" : "简洁自然";
         StringBuilder sb = new StringBuilder();
-        sb.append("请写一段求职打招呼话术，直接面向招聘方，语气").append(styleText).append("。\n")
-                .append("目标字数：").append(lo).append("-").append(hi).append(" 字。\n")
-                .append("只能使用下面【个人资料】与【岗位信息】中的事实，不得编造任何经历、项目或技能。\n")
-                .append("话术里必须自然体现【可实习月数】与【每周出勤天数】，不得改变这两个数字。\n")
-                .append("月数与天数必须用阿拉伯数字书写（如 3 个月、每周 4 天），不要写成中文数字。\n")
-                .append("不要写“建议”类内容，不要写解释，只输出 JSON：{\"message\":\"话术正文\"}。\n\n")
-                .append("【个人资料】\n")
-                .append("学校：").append(nz(v.get("schoolFull"))).append("\n")
-                .append("年级：").append(nz(v.get("grade"))).append("\n")
-                .append("学历：").append(nz(v.get("degree"))).append("生\n")
-                .append("专业：").append(nz(v.get("major"))).append("\n")
-                .append("技能标签：").append(nz(v.get("profileSkills"))).append("\n")
-                .append("技能佐证：").append(nz(v.get("profileEvidence"))).append("\n")
-                .append("匹配到的岗位方向：").append(nz(v.get("direction"))).append("\n")
-                .append("方向技能句：").append(nz(v.get("skillClause"))).append("\n")
-                .append("是否提及AI工具：").append("true".equals(v.get("aiAgentOk")) ? "可以提" : "不要提").append("\n")
-                .append("可开始时间：").append(nz(v.get("startFrom"))).append("\n")
-                .append("可实习月数：").append(nz(v.get("months"))).append(" 个月\n")
-                .append("每周出勤天数：").append(nz(v.get("days"))).append(" 天\n\n")
-                .append("【岗位信息】\n")
-                .append("公司：").append(nz(v.get("company"))).append("\n")
-                .append("岗位：").append(nz(v.get("title"))).append("\n")
-                .append("技术栈：").append(nz(v.get("jobSkills"))).append("\n")
-                .append("岗位要求：").append(nz(v.get("jdText"))).append("\n")
-                .append("地点：").append(nz(v.get("rawLocation"))).append("\n");
+        sb.append("请用下面的占位符设计一段求职打招呼话术的表达骨架，语气").append(styleText).append("。\n")
+                .append("渲染后的目标字数：").append(lo).append("-").append(hi).append(" 字。\n")
+                .append("规则：\n")
+                .append("1. 只用占位符承载事实，保留 {{名称}} 原样，不要替换成具体内容。\n")
+                .append("2. 必须包含这些占位符：").append(joinSlots(SKELETON_REQUIRED_SLOTS)).append("。\n")
+                .append("3. 可以增删礼貌用语与连接词，但不得出现占位符清单以外的任何具体事实与技术名词。\n")
+                .append("4. 月数、天数用 {{months}}、{{days}} 表示，由系统填阿拉伯数字，不要自己写数字。\n")
+                .append("5. 只输出 JSON：{\"message\":\"表达骨架\"}，不要输出解释。\n\n")
+                .append("【可用占位符及含义】\n")
+                .append("{{school}} 学校；{{schoolShort}} 学校简称；{{grade}} 年级；{{degreeLabel}} 学历\n")
+                .append("{{majorClause}} 专业句（含前导逗号）；{{nameClause}} 姓名句（含前导逗号）\n")
+                .append("{{skillClause}} 技能句（系统按真实资料确定）；{{direction}} 岗位方向\n")
+                .append("{{months}} 可实习月数；{{days}} 每周出勤天数\n")
+                .append("{{startFromClause}} 到岗时间句（含前导逗号）；{{aiPart}} AI 工具句（由开关决定）\n")
+                .append("{{company}} 公司；{{title}} 岗位\n");
         return sb.toString();
     }
 
-    /** 自由生成：与 polish 相同的调用流程，但使用创作型 system prompt */
+    private String joinSlots(Set<String> slots) {
+        // 固定顺序，便于成本预估与缓存命中
+        List<String> ordered = List.of("school", "degreeLabel", "skillClause", "months", "days");
+        StringBuilder sb = new StringBuilder();
+        for (String s : ordered) {
+            if (slots.contains(s)) {
+                if (sb.length() > 0) sb.append(" ");
+                sb.append("{{").append(s).append("}}");
+            }
+        }
+        return sb.toString();
+    }
+
+    /** 骨架生成：与 polish 相同的调用流程，但使用「只设计表达、不写事实」的 system prompt */
     public AiResult createFree(String prompt) {
         SettingsService.SettingsSnapshot s = snap();
         String baseUrl = s.baseUrl();
@@ -116,7 +144,7 @@ public class AiGreetingClient {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("messages", List.of(
-                Map.of("role", "system", "content", FREE_SYSTEM_PROMPT),
+                Map.of("role", "system", "content", SKELETON_SYSTEM_PROMPT),
                 Map.of("role", "user", "content", prompt)
         ));
         body.put("temperature", 0.4);
@@ -148,10 +176,6 @@ public class AiGreetingClient {
             log.warn("解析自由生成响应失败：{}", e.getMessage());
             throw new IllegalStateException("解析自由生成响应失败", e);
         }
-    }
-
-    private String nz(String s) {
-        return s == null || s.isBlank() ? "未提供" : s;
     }
 
     /** 调用模型并返回润色后的消息与 token 用量 */

@@ -13,6 +13,9 @@ import java.util.Optional;
 
 public interface JobRepository extends JpaRepository<Job, Long> {
 
+    /** 业务入口统一用此查询：软删岗位对外视为不存在 */
+    Optional<Job> findByIdAndDeletedFalse(Long id);
+
     /** 查重只看未删除的岗位：软删不占用公司+岗位名称 */
     Optional<Job> findByCompanyAndTitleAndDeletedFalse(String company, String title);
 

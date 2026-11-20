@@ -117,4 +117,53 @@ class GreetingValidatorTest {
         assertFalse(r.ok());
         assertTrue(r.warnings().get(0).contains("阿拉伯数字"));
     }
+
+    // ===== 表达骨架结构校验（新架构：事实由占位符承载，模型不写具体值） =====
+
+    private static final Set<String> ALLOWED = AiGreetingClient.SKELETON_SLOTS;
+    private static final Set<String> REQUIRED = AiGreetingClient.SKELETON_REQUIRED_SLOTS;
+
+    @Test
+    void 合法骨架应通过结构校验() {
+        String skeleton = "您好，我是{{school}}{{degreeLabel}}。本人{{skillClause}}"
+                + "可连续实习{{months}}个月，每周{{days}}天。希望收到您的回复。";
+        GreetingValidator.Result r = validator.validateSkeleton(skeleton, ALLOWED, REQUIRED);
+        assertTrue(r.ok(), () -> r.warnings().toString());
+    }
+
+    @Test
+    void 骨架写死月数天数应被拒绝() {
+        String skeleton = "您好，我是{{school}}{{degreeLabel}}。本人{{skillClause}}"
+                + "可连续实习3个月，每周4天。";
+        // 缺少 months/days 占位符 + 写死数字，双重违规
+        GreetingValidator.Result r = validator.validateSkeleton(skeleton, ALLOWED, REQUIRED);
+        assertFalse(r.ok());
+    }
+
+    @Test
+    void 骨架含未知占位符应被拒绝() {
+        String skeleton = "您好，我是{{school}}{{degreeLabel}}，熟悉{{fakeSkill}}，"
+                + "本人{{skillClause}}可实习{{months}}个月每周{{days}}天。";
+        GreetingValidator.Result r = validator.validateSkeleton(skeleton, ALLOWED, REQUIRED);
+        assertFalse(r.ok());
+        assertTrue(r.warnings().get(0).contains("fakeSkill"));
+    }
+
+    @Test
+    void 骨架缺少必要占位符应被拒绝() {
+        String skeleton = "您好，我是{{school}}，{{skillClause}}{{months}}个月{{days}}天。";
+        // 缺 degreeLabel
+        GreetingValidator.Result r = validator.validateSkeleton(skeleton, ALLOWED, REQUIRED);
+        assertFalse(r.ok());
+        assertTrue(r.warnings().get(0).contains("degreeLabel"));
+    }
+
+    @Test
+    void 骨架偷写具体数字按月数格式应被拒绝() {
+        String skeleton = "您好，我是{{school}}{{degreeLabel}}{{skillClause}}"
+                + "，承诺实习13个月，{{months}}个月{{days}}天。";
+        GreetingValidator.Result r = validator.validateSkeleton(skeleton, ALLOWED, REQUIRED);
+        assertFalse(r.ok());
+        assertTrue(r.warnings().get(0).contains("写死"));
+    }
 }

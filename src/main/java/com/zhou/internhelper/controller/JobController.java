@@ -123,12 +123,15 @@ public class JobController {
         }
         record = recordRepository.save(record);
 
-        // 状态保护：失败不把已 CONTACTED 的岗位打回 NEW
+        // 状态保护：失败只把 NEW/null 归一为 NEW，SKIPPED / CONTACTED 均保持不变
         String current = job.getStatus();
         if (success) {
             jobService.updateStatus(job.getId(), "CONTACTED");
-        } else if (!"CONTACTED".equals(current)) {
-            jobService.updateStatus(job.getId(), "NEW");
+        } else {
+            String next = jobService.nextStatusAfterFailure(current);
+            if (!java.util.Objects.equals(next, current)) {
+                jobService.updateStatus(job.getId(), next);
+            }
         }
 
         Map<String, Object> map = new LinkedHashMap<>();

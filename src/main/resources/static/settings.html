@@ -39,6 +39,12 @@
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eef1f4; }
     th { background: #f0f4f6; font-weight: 500; }
+    .modal-mask { position: fixed; inset: 0; background: rgba(20,30,30,.45); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+    .modal { background: #fff; border-radius: 10px; max-width: 460px; width: 100%; padding: 22px 24px; box-shadow: 0 12px 40px rgba(0,0,0,.2); }
+    .modal h3 { margin: 0 0 12px; font-size: 16px; color: #b9770e; }
+    .modal ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.9; color: #445; }
+    .modal .note { font-size: 12px; color: #889; margin-top: 12px; }
+    .modal button { margin-top: 18px; }
   </style>
 </head>
 <body>
@@ -61,13 +67,13 @@
         </select>
       </div>
       <div class="row"><label>默认模板</label>
-        <select id="template">
+        <select id="template" onchange="onTemplateChange()">
           <option value="concise">简洁</option>
           <option value="formal">正式</option>
           <option value="free">AI自由生成（无模板）</option>
         </select>
         <div></div>
-        <div class="hint">个人资料页若已选句式，以个人资料为准；这里只作为未设置时的默认值。“AI自由生成”下 AI 直接读个人资料创作，需开启 AI / HYBRID 模式。</div>
+        <div class="hint">个人资料页若已选句式，以个人资料为准；这里只作为未设置时的默认值。“AI自由生成”由 AI 设计表达、系统回填事实，需开启 AI / HYBRID 模式。</div>
       </div>
       <div class="row"><label>AI 自动回退</label>
         <select id="autoFallback">
@@ -133,6 +139,20 @@
     </div>
   </div>
 </main>
+
+<div class="modal-mask" id="freeRiskMask">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="freeRiskTitle">
+    <h3 id="freeRiskTitle">⚠ AI 自由生成 · 风险提示</h3>
+    <ul>
+      <li>自由生成由 AI 组织表达与语气，事实（学校、专业、技能、月数、天数等）由系统按占位符确定性回填，AI 看不到也不会编造具体事实值。</li>
+      <li>但连接词与语气仍由模型生成，兜底校验可降低、无法 100% 杜绝异常表达；生成结果请人工确认后再投递。</li>
+      <li>此模式需把生成模式设为 AI / HYBRID；RULE 模式下会自动回退到内置模板。</li>
+      <li>每次生成按实际 token 用量计费；平台额度用尽时自动回退内置模板，也可接入自带 API Key。</li>
+    </ul>
+    <div class="note">此提示仅供告知，不影响你的选择，可直接关闭。</div>
+    <button class="primary" onclick="closeFreeRisk()">我知道了</button>
+  </div>
+</div>
 
 <div class="toast" id="toast"></div>
 
@@ -266,6 +286,26 @@
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
+
+  // 选择「AI自由生成」时弹出风险提示（纯告知，不强制确认）
+  function onTemplateChange() {
+    if ($('template').value === 'free') openFreeRisk();
+  }
+  function openFreeRisk() {
+    $('freeRiskMask').style.display = 'flex';
+  }
+  function closeFreeRisk() {
+    $('freeRiskMask').style.display = 'none';
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    const mask = $('freeRiskMask');
+    // 点遮罩空白处关闭；点弹窗内部不关闭
+    mask.addEventListener('click', function (e) { if (e.target === mask) closeFreeRisk(); });
+    // Esc 关闭
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && mask.style.display === 'flex') closeFreeRisk();
+    });
+  });
 
   load();
 </script>
