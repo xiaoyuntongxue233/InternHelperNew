@@ -98,6 +98,7 @@
       <div class="row"><label></label>
         <div>
           <button onclick="testConnection()" id="btnTest">测试连接</button>
+          <div class="hint" style="margin-top:4px">测试会发起一次真实请求；留空测试已保存的 Key（按平台额度扣费），在上方填入新 Key 则按自带 Key 测试（不扣平台额度）。60 秒内最多 3 次。</div>
           <div class="msg" id="testMsg"></div>
         </div>
       </div>
@@ -249,7 +250,10 @@
     } catch (e) {
       msg.className = 'msg err';
       msg.textContent = '测试失败：' + e.message;
-    } finally { btn.disabled = false; }
+    } finally {
+      // 请求后冷却 3 秒，避免连续点击无谓消耗额度
+      setTimeout(() => { btn.disabled = false; }, 3000);
+    }
   }
 
   function toggleAdvanced() {

@@ -27,19 +27,24 @@ public class SettingsService {
     private static final BigDecimal THOUSAND = BigDecimal.valueOf(1000);
     private static final BigDecimal MILLION = BigDecimal.valueOf(1_000_000);
 
+    private static final String BYO_KEY = "ai.byo-api-key";
+
     private final AppSettingRepository repository;
     private final AiProperties ai;
     private final BillingProperties billing;
     private final GreetingProperties greeting;
+    private final SecretCipher cipher;
 
     private volatile SettingsSnapshot snapshot;
 
     public SettingsService(AppSettingRepository repository, AiProperties ai,
-                           BillingProperties billing, GreetingProperties greeting) {
+                           BillingProperties billing, GreetingProperties greeting,
+                           SecretCipher cipher) {
         this.repository = repository;
         this.ai = ai;
         this.billing = billing;
         this.greeting = greeting;
+        this.cipher = cipher;
     }
 
     @PostConstruct
@@ -52,7 +57,9 @@ public class SettingsService {
         seed("ai.model", ai.getModel());
         seed("ai.key-source", StringUtils.hasText(ai.getByoApiKey())
                 || "BYO".equalsIgnoreCase(billing.getMode()) ? "BYO" : "PLATFORM");
-        seed("ai.byo-api-key", ai.getByoApiKey());
+        seedEncrypted(BYO_KEY, ai.getByoApiKey());
+        // 存量明文 Key 迁移为密文（幂等：已是 enc:v1: 前缀的跳过）
+        migratePlaintextKey();
         seed("ai.price-input-per-1m", str(ai.getPriceInputPer1m()));
         seed("ai.price-input-cache-hit-per-1m", str(ai.getPriceInputCacheHitPer1m()));
         seed("ai.price-input-cache-miss-per-1m", str(ai.getPriceInputCacheMissPer1m()));
@@ -65,6 +72,26 @@ public class SettingsService {
     private void seed(String key, String value) {
         if (!repository.existsById(key)) {
             repository.save(new AppSetting(key, value == null ? "" : value));
+        }
+    }
+
+    /** 首次种子写入敏感项时直接加密 */
+    private void seedEncrypted(String key, String plainValue) {
+        if (!repository.existsById(key)) {
+            repository.save(new AppSetting(key, cipher.encrypt(plainValue == null ? "" : plainValue)));
+        }
+    }
+
+    /** 把历史明文 Key 迁移为密文；已是密文的跳过，空值跳过 */
+    private void migratePlaintextKey() {
+        AppSetting row = repository.findById(BYO_KEY).orElse(null);
+        if (row == null) {
+            return;
+        }
+        String current = row.getSettingValue();
+        if (StringUtils.hasText(current) && !current.startsWith("enc:v1:")) {
+            row.setSettingValue(cipher.encrypt(current));
+            repository.save(row);
         }
     }
 
@@ -106,7 +133,12 @@ public class SettingsService {
             String key = canonicalKey(rawKey);
             AppSetting row = repository.findById(key)
                     .orElseGet(() -> new AppSetting(key, null));
-            row.setSettingValue(value == null ? "" : String.valueOf(value));
+            String stored = value == null ? "" : String.valueOf(value);
+            // 入库的 API Key 加密保存，数据库里看不到明文
+            if (BYO_KEY.equals(key)) {
+                stored = cipher.encrypt(stored);
+            }
+            row.setSettingValue(stored);
             repository.save(row);
         });
         refresh();
@@ -124,7 +156,7 @@ public class SettingsService {
         String baseUrl = trimToNull(values.get("ai.base-url"));
         String model = trimToNull(values.get("ai.model"));
         String keySource = "BYO".equalsIgnoreCase(values.get("ai.key-source")) ? "BYO" : "PLATFORM";
-        String byoApiKey = trimToNull(values.get("ai.byo-api-key"));
+        String byoApiKey = trimToNull(cipher.decrypt(values.get(BYO_KEY)));
 
         BigDecimal input = toPerMillion(values.get("ai.price-input-per-1m"), ai.getPriceInputPer1k());
         BigDecimal hit = toPerMillion(values.get("ai.price-input-cache-hit-per-1m"), ai.getPriceInputCacheHitPer1k());

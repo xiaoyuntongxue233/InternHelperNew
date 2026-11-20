@@ -28,4 +28,8 @@ public interface ApplicationRecordRepository extends JpaRepository<ApplicationRe
 
     @Query("select count(r) from ApplicationRecord r where r.success = false and r.sentAt between :from and :to")
     long countFailed(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
+
+    /** 幂等：查某岗位当天的最新一条投递记录 */
+    List<ApplicationRecord> findByJobIdAndSentAtBetweenOrderBySentAtDesc(
+            Long jobId, LocalDateTime from, LocalDateTime to);
 }

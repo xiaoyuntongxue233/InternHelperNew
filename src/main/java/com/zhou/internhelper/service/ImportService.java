@@ -53,6 +53,7 @@ public class ImportService {
         try {
             Files.createDirectories(dropPath());
             Files.createDirectories(dropPath().resolve("imported"));
+            Files.createDirectories(dropPath().resolve("failed"));
         } catch (IOException e) {
             log.warn("创建导入目录失败：{}", e.getMessage());
         }
@@ -119,6 +120,15 @@ public class ImportService {
                     Files.move(file, target, StandardCopyOption.REPLACE_EXISTING);
                 } catch (Exception e) {
                     log.warn("导入 {} 失败：{}", file.getFileName(), e.getMessage());
+                    // 失败文件移入 failed/，避免每 5 分钟重复重试和重复写批次
+                    try {
+                        Path failed = dir.resolve("failed").resolve(
+                                file.getFileName().toString().replace(".json", "-" + LocalDateTime.now().format(TS) + ".json"));
+                        Files.move(file, failed, StandardCopyOption.REPLACE_EXISTING);
+                        log.info("失败文件已隔离到 {}", failed.getFileName());
+                    } catch (IOException moveError) {
+                        log.warn("隔离失败文件 {} 时出错：{}", file.getFileName(), moveError.getMessage());
+                    }
                 }
             }
         } catch (IOException e) {

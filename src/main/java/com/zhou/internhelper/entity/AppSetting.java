@@ -15,7 +15,8 @@ public class AppSetting {
     @Column(name = "setting_key", nullable = false, length = 64)
     private String settingKey;
 
-    @Column(name = "setting_value", length = 512)
+    // 加长以容纳加密后的密文（base64 膨胀约 1.4 倍）
+    @Column(name = "setting_value", length = 1024)
     private String settingValue;
 
     @Column(nullable = false)

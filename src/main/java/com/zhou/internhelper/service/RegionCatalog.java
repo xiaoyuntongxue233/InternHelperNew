@@ -70,30 +70,63 @@ public class RegionCatalog {
         if (raw == null || raw.isBlank()) {
             return new Region(null, null, null);
         }
-        String text = raw.trim().replace("·", "").replace(" ", "");
+        String text = raw.trim()
+                .replace("·", "").replace(" ", "")
+                .replace("特别行政区", "市").replace("自治区", "")
+                .replace("壮族", "").replace("回族", "").replace("维吾尔", "");
 
-        // 先试「省名开头」，比如 广东省广州市
-        for (Map.Entry<String, String> e : new LinkedHashMap<>(CITY_TO_PROVINCE).entrySet()) {
-            String city = e.getKey();
-            if (text.startsWith(city)) {
-                String rest = text.substring(city.length()).trim();
-                return new Region(e.getValue(), city, rest.isEmpty() ? null : rest);
-            }
-        }
-        // 再试「省名开头 + 城市在中间」：广东省广州
+        // 模式一：省名开头（广东省广州市海珠区 / 广东省广州市）
         for (String province : new java.util.LinkedHashSet<>(CITY_TO_PROVINCE.values())) {
             if (text.startsWith(province)) {
-                String rest = text.substring(province.length()).trim();
+                String rest = stripAdminPrefix(text.substring(province.length()));
                 for (String city : citiesOf(province)) {
                     if (rest.startsWith(city)) {
-                        String district = rest.substring(city.length()).trim();
+                        String district = cleanDistrict(stripAdminPrefix(rest.substring(city.length())));
                         return new Region(province, city, district.isEmpty() ? null : district);
                     }
                 }
-                return new Region(province, rest.isEmpty() ? null : rest, null);
+                // 直辖市（北京/上海/天津/重庆）：省名即城市名，rest 是区县
+                if (citiesOf(province).contains(province)) {
+                    String district = cleanDistrict(rest);
+                    return new Region(province, province, district.isEmpty() ? null : district);
+                }
+                // 普通省份但城市不在字典（如广东省某县）：整段作为城市名兜底
+                String city = cleanDistrict(rest);
+                return new Region(province, city.isEmpty() ? null : city, null);
             }
         }
-        return new Region(null, text, null);
+
+        // 模式二：城市名开头（广州市海珠区 / 广州海珠区 / 深圳市南山区）
+        for (Map.Entry<String, String> e : CITY_TO_PROVINCE.entrySet()) {
+            String city = e.getKey();
+            if (text.startsWith(city)) {
+                String district = cleanDistrict(stripAdminPrefix(text.substring(city.length())));
+                return new Region(e.getValue(), city, district.isEmpty() ? null : district);
+            }
+        }
+
+        return new Region(null, cleanDistrict(text), null);
+    }
+
+    /** 去掉行政层级前缀：市 / 地区 / 州 / 盟 等，避免把「市海珠区」当成区县 */
+    private String stripAdminPrefix(String s) {
+        String result = s.trim();
+        for (String prefix : new String[]{"地区", "自治州", "林区", "省", "市", "州", "盟"}) {
+            if (result.startsWith(prefix)) {
+                return result.substring(prefix.length()).trim();
+            }
+        }
+        return result;
+    }
+
+    /** 区县名清洗：去掉尾部助词与多余符号，保留「xx区 / xx县」 */
+    private String cleanDistrict(String s) {
+        String result = s == null ? "" : s.trim();
+        // 逗号等分隔符之后的街道信息丢弃，只留第一段
+        int comma = result.indexOf('，');
+        if (comma < 0) comma = result.indexOf(',');
+        if (comma > 0) result = result.substring(0, comma).trim();
+        return result;
     }
 
     public Optional<String> provinceOfCity(String city) {

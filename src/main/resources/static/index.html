@@ -110,7 +110,8 @@
   let stack = [];
   let pageNo = 1;
   let totalPages = 1;
-  let sortField = 'status';   // 默认按状态排：NEW 在前、CONTACTED 自动沉到最后
+  // 默认不排序 → 走游标模式（顺序翻页、深翻页恒定耗时）；点表头排序才切到 offset 模式
+  let sortField = null;
   let sortOrder = 'desc';
 
   async function api(path) {
@@ -297,7 +298,7 @@
     document.getElementById('status').value = '';
     document.getElementById('category').value = 'INTERN';
     document.getElementById('q').value = '';
-    sortField = 'status';
+    sortField = null;
     sortOrder = 'desc';
     load(true);
   }
@@ -364,8 +365,12 @@
   }
 
   async function contacted(id) {
+    // 只把用户已经看到的那份话术存进投递记录；没有生成过就传空，不在后端隐式生成。
+    const box = document.getElementById('g-' + id);
+    const message = box ? (box.dataset.message || '') : '';
     const res = await fetch(`/api/jobs/${id}/contacted`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message })
     });
     const r = await res.json();
     alert(r.success ? '已记录投递' : '记录失败');

@@ -10,6 +10,8 @@ import com.zhou.internhelper.service.RegionCatalog;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -88,32 +90,52 @@ public class JobController {
         return map;
     }
 
-    /** 记录一次投递（会把岗位状态改成 CONTACTED） */
+    /** 记录一次投递（幂等：同岗位当天复用一条记录） */
     @PostMapping("/{id}/contacted")
     @Transactional
     public Map<String, Object> markContacted(@PathVariable Long id,
                                              @RequestBody(required = false) Map<String, String> body) {
         Job job = jobService.get(id);
-        GreetingService.Greeting g = greetingService.generate(job);
-        String message = body != null && body.get("message") != null ? body.get("message") : g.message();
+        // 投递记录只保存前端已经生成并展示的那份话术，不在此处隐式调用模型，
+        // 避免一次「标记已投」额外消耗一次 AI 额度。message 为空是允许的。
+        String message = body == null ? null : body.get("message");
         boolean success = body == null || body.get("success") == null || Boolean.parseBoolean(body.get("success"));
+        String failReason = body == null ? null : body.get("failReason");
 
-        ApplicationRecord record = new ApplicationRecord();
+        // 幂等：同一岗位当天已有记录则更新，不重复计数
+        LocalDateTime start = LocalDate.now().atStartOfDay();
+        LocalDateTime end = start.plusDays(1);
+        var today = recordRepository.findByJobIdAndSentAtBetweenOrderBySentAtDesc(job.getId(), start, end);
+        ApplicationRecord record = today.isEmpty() ? new ApplicationRecord() : today.get(0);
+        boolean created = record.getId() == null;
+
         record.setJobId(job.getId());
         record.setCompany(job.getCompany());
         record.setTitle(job.getTitle());
-        record.setMessage(message);
-        record.setSuccess(success);
-        if (!success && body != null) {
-            record.setFailReason(body.get("failReason"));
+        // 已有记录且本次没带话术时保留原话术，避免幂等更新把内容清空
+        if (message != null || created) {
+            record.setMessage(message);
         }
-        recordRepository.save(record);
-        jobService.updateStatus(job.getId(), success ? "CONTACTED" : "NEW");
+        record.setSuccess(success);
+        record.setFailReason(success ? null : failReason);
+        if (created) {
+            record.setSentAt(LocalDateTime.now());
+        }
+        record = recordRepository.save(record);
+
+        // 状态保护：失败不把已 CONTACTED 的岗位打回 NEW
+        String current = job.getStatus();
+        if (success) {
+            jobService.updateStatus(job.getId(), "CONTACTED");
+        } else if (!"CONTACTED".equals(current)) {
+            jobService.updateStatus(job.getId(), "NEW");
+        }
 
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("recordId", record.getId());
         map.put("success", success);
-        map.put("message", message);
+        map.put("message", record.getMessage());
+        map.put("reused", !created);
         return map;
     }
 

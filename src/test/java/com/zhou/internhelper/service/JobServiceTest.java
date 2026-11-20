@@ -1,0 +1,223 @@
+package com.zhou.internhelper.service;
+
+import com.zhou.internhelper.config.CandidateProperties;
+import com.zhou.internhelper.entity.Job;
+import com.zhou.internhelper.repository.JobRepository;
+import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.lang.reflect.Proxy;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * 岗位服务契约测试：编辑改名查重、软删除、哈希去重。
+ * 不用 Mockito（Java 25 兼容问题），用 JDK 动态代理的内存版 Repository。
+ */
+class JobServiceTest {
+
+    private final Map<Long, Job> store = new LinkedHashMap<>();
+    private final AtomicLong seq = new AtomicLong(0);
+    private JobService service;
+
+    @BeforeEach
+    void setUp() {
+        JobRepository repo = (JobRepository) Proxy.newProxyInstance(
+                JobRepository.class.getClassLoader(),
+                new Class<?>[]{JobRepository.class},
+                (proxy, method, args) -> handle(method.getName(), args));
+        service = new JobService(repo, new RegionCatalog(), new MetaParser(),
+                (EntityManager) Proxy.newProxyInstance(EntityManager.class.getClassLoader(),
+                        new Class<?>[]{EntityManager.class}, (p, m, a) -> null));
+    }
+
+    private Object handle(String name, Object[] args) {
+        switch (name) {
+            case "save": {
+                Job job = (Job) args[0];
+                if (job.getId() == null) job.setId(seq.incrementAndGet());
+                store.put(job.getId(), job);
+                return job;
+            }
+            case "saveAll": {
+                @SuppressWarnings("unchecked")
+                Iterable<Job> jobs = (Iterable<Job>) args[0];
+                jobs.forEach(j -> {
+                    if (j.getId() == null) j.setId(seq.incrementAndGet());
+                    store.put(j.getId(), j);
+                });
+                return jobs;
+            }
+            case "findById":
+                return Optional.ofNullable(store.get(args[0]));
+            case "findByTitleHashAndDeletedFalse": {
+                String hash = (String) args[0];
+                return store.values().stream()
+                        .filter(j -> hash.equals(j.getTitleHash()) && !j.isDeleted())
+                        .findFirst();
+            }
+            case "findByDeletedTrue":
+                return store.values().stream().filter(Job::isDeleted).toList();
+            case "existsByCompanyAndTitleAndDeletedFalse": {
+                String company = (String) args[0];
+                String title = (String) args[1];
+                return store.values().stream().anyMatch(j -> !j.isDeleted()
+                        && company.equals(j.getCompany()) && title.equals(j.getTitle()));
+            }
+            case "findByCompanyAndTitleAndDeletedFalse": {
+                String company = (String) args[0];
+                String title = (String) args[1];
+                return store.values().stream().filter(j -> !j.isDeleted()
+                        && company.equals(j.getCompany()) && title.equals(j.getTitle())).findFirst();
+            }
+            case "countByDeletedFalse":
+                return (long) store.values().stream().filter(j -> !j.isDeleted()).count();
+            case "findByDeletedFalse":
+                return store.values().stream().filter(j -> !j.isDeleted()).toList();
+            case "findByProvinceIsNullAndDeletedFalse":
+            case "findByMonthsIsNullAndDeletedFalse":
+            case "findByDailyMinIsNullAndDeletedFalse":
+            case "findByStatusAndDeletedFalse":
+                return java.util.List.of();
+            case "countByStatusAndDeletedFalse":
+                return 0L;
+            case "findAll":
+                return store.values().stream().toList();
+            case "delete":
+                store.remove(((Job) args[0]).getId());
+                return null;
+            case "toString":
+                return "JobRepositoryStub";
+            default:
+                return null;
+        }
+    }
+
+    private Job newJob(String company, String title) {
+        Job job = new Job();
+        job.setCompany(company);
+        job.setTitle(title);
+        return job;
+    }
+
+    @Test
+    void 创建岗位写入哈希() {
+        Job job = service.create(newJob("腾讯", "Java开发实习"));
+        assertNotNull(job.getTitleHash());
+        assertEquals(32, job.getTitleHash().length());
+    }
+
+    @Test
+    void 创建重名岗位被拒() {
+        service.create(newJob("腾讯", "Java开发实习"));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.create(newJob("腾讯", "Java开发实习")));
+    }
+
+    @Test
+    void 编辑改名撞车被拒() {
+        Job a = service.create(newJob("腾讯", "岗位A"));
+        service.create(newJob("腾讯", "岗位B"));
+        Job patch = new Job();
+        patch.setTitle("岗位B");
+        assertThrows(IllegalArgumentException.class, () -> service.update(a.getId(), patch));
+    }
+
+    @Test
+    void 编辑成自身同名通过() {
+        Job a = service.create(newJob("腾讯", "岗位A"));
+        Job patch = new Job();
+        patch.setTitle("岗位A");
+        assertDoesNotThrow(() -> service.update(a.getId(), patch));
+    }
+
+    @Test
+    void 删除为软删除且记录仍保留() {
+        Job a = service.create(newJob("腾讯", "岗位A"));
+        Long id = a.getId();
+        service.delete(id);
+        assertTrue(store.get(id).isDeleted(), "应保留记录但标记删除");
+        assertTrue(store.containsKey(id), "软删除不应物理移除记录");
+    }
+
+    @Test
+    void 存量重复去重保留最小id并回填哈希() {
+        // 绕过 create 的查重，直接构造两条重复（含大小写差异）与一条正常记录
+        Job first = newJob("腾讯", "Java实习");
+        first.setId(1L);
+        Job dup = newJob("腾讯", "Java实习");
+        dup.setId(2L);
+        Job other = newJob("阿里", "后端实习");
+        other.setId(3L);
+        store.put(1L, first);
+        store.put(2L, dup);
+        store.put(3L, other);
+
+        service.prepareUniqueIndex();
+
+        assertTrue(store.containsKey(2L), "重复记录改为软删，不再物理删除");
+        assertTrue(store.get(2L).isDeleted(), "重复记录应被标记软删");
+        assertNull(store.get(2L).getTitleHash(), "软删记录应清空哈希释放唯一键");
+        assertTrue(store.containsKey(1L), "应保留 id 最小者");
+        assertFalse(store.get(1L).isDeleted(), "保留者应保持活跃");
+        assertNotNull(store.get(1L).getTitleHash(), "保留记录应回填哈希");
+        assertNotNull(store.get(3L).getTitleHash(), "正常记录也应回填哈希");
+    }
+
+    @Test
+    void 大小写差异视为同一岗位() {
+        Job first = newJob("Tencent", "Dev");
+        first.setId(10L);
+        Job dup = newJob("tencent", "dev");
+        dup.setId(11L);
+        store.put(10L, first);
+        store.put(11L, dup);
+
+        service.prepareUniqueIndex();
+
+        assertTrue(store.containsKey(11L));
+        assertTrue(store.get(11L).isDeleted(), "大小写不同也应判为重复并软删");
+        assertFalse(store.get(10L).isDeleted());
+    }
+
+    @Test
+    void 删除后清空哈希且可重建同名() {
+        Job a = service.create(newJob("腾讯", "岗位A"));
+        String oldHash = a.getTitleHash();
+        assertNotNull(oldHash);
+
+        service.delete(a.getId());
+        assertTrue(a.isDeleted());
+        assertNull(a.getTitleHash(), "软删应清空哈希释放唯一键");
+
+        // 重建同名岗位：不再被软删行挡住
+        Job rebuilt = assertDoesNotThrow(() -> service.create(newJob("腾讯", "岗位A")));
+        assertNotNull(rebuilt.getTitleHash());
+        assertEquals(oldHash, rebuilt.getTitleHash(), "同名重建后哈希应与原值一致");
+    }
+
+    @Test
+    void 软删行id更小时不误删活跃同名行() {
+        // 场景：id=1 是软删的同名行（hash 残留），id=5 是活跃同名行
+        Job deleted = newJob("腾讯", "岗位A");
+        deleted.setId(1L);
+        deleted.setDeleted(true);
+        deleted.setTitleHash("stale-hash");
+        Job active = newJob("腾讯", "岗位A");
+        active.setId(5L);
+        store.put(1L, deleted);
+        store.put(5L, active);
+
+        service.prepareUniqueIndex();
+
+        assertNull(store.get(1L).getTitleHash(), "存量软删行的残留哈希应被清空");
+        assertTrue(store.containsKey(5L), "活跃同名行不应被误删");
+        assertFalse(store.get(5L).isDeleted(), "活跃行应作为唯一存活者保持活跃");
+        assertNotNull(store.get(5L).getTitleHash(), "活跃行应被回填哈希");
+    }
+}

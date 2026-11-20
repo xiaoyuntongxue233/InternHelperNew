@@ -58,11 +58,15 @@ public class SettingsController {
 
     @PostMapping("/test-connection")
     public AiGreetingClient.TestResult test(@RequestBody(required = false) Map<String, String> body) {
+        // 1) 限流：所有尝试（含失败）都占名额，防止无鉴权场景下反复点击刷接口
+        if (!quota.tryAcquireTestSlot()) {
+            return AiGreetingClient.TestResult.failure("测试过于频繁，请 60 秒后再试。");
+        }
+
         SettingsService.SettingsSnapshot s = settings.snapshot();
         Map<String, String> b = body == null ? Map.of() : body;
         String baseUrl = value(b, "baseUrl", s.baseUrl());
         String model = value(b, "model", s.model());
-        String apiKey = value(b, "apiKey", s.activeApiKey());
         Integer timeout = null;
         try {
             String t = value(b, "timeoutMs", null);
@@ -72,7 +76,37 @@ public class SettingsController {
         } catch (NumberFormatException ignored) {
             timeout = null;
         }
-        return aiClient.testConnection(baseUrl, model, apiKey, timeout);
+
+        // 2) 按「本次实际使用的 Key」决定模式，而非当前快照开关：
+        //    用户临时填了新 Key（且不等于平台 Key）→ BYO，不占用平台额度；
+        //    留空或填的就是平台 Key → PLATFORM，走额度预检。
+        String provided = b.get("apiKey");
+        String platformKey = s.platformApiKey();
+        String apiKey;
+        boolean byo;
+        if (provided != null && !provided.isBlank()) {
+            apiKey = provided.trim();
+            byo = !apiKey.equals(platformKey);
+        } else {
+            apiKey = s.activeApiKey();
+            byo = s.useByo();
+        }
+        String mode = byo ? "BYO" : "PLATFORM";
+
+        // 3) 预检：仅 PLATFORM 模式受额度约束。测试请求固定 max_tokens=1，避免虚高误拒
+        BigDecimal estimate = quota.estimateCost(AiGreetingClient.TEST_PROMPT, 1);
+        if (!byo && !quota.canSpend(estimate)) {
+            return AiGreetingClient.TestResult.failure(
+                    "默认额度已用完，测试连接已跳过；如需继续，请自行接入 API。");
+        }
+
+        // 4) 调用；5) 仅成功时记账，且按本次实际模式记录（鉴权失败/网络错误不扣费）
+        AiGreetingClient.TestResult result = aiClient.testConnection(baseUrl, model, apiKey, timeout);
+        if (result.success()) {
+            quota.charge(null, "test-connection", result.promptTokens(), result.cacheHitTokens(),
+                    result.completionTokens(), result.usageReported(), estimate, "test", mode);
+        }
+        return result;
     }
 
     @GetMapping("/usage")

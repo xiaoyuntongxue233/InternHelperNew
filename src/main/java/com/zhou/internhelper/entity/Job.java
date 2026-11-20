@@ -7,11 +7,13 @@ import java.time.LocalDateTime;
  * 岗位
  */
 @Entity
-@Table(name = "job", indexes = {
-        @Index(name = "idx_job_company", columnList = "company"),
-        @Index(name = "idx_job_region", columnList = "province,city,district"),
-        @Index(name = "idx_job_status_id", columnList = "status,id")
-})
+@Table(name = "job",
+        uniqueConstraints = @UniqueConstraint(name = "uk_job_title_hash", columnNames = "title_hash"),
+        indexes = {
+                @Index(name = "idx_job_company", columnList = "company"),
+                @Index(name = "idx_job_region", columnList = "province,city,district"),
+                @Index(name = "idx_job_status_id", columnList = "status,id")
+        })
 public class Job {
 
     @Id
@@ -25,6 +27,18 @@ public class Job {
     /** 岗位名称 */
     @Column(nullable = false, length = 255)
     private String title;
+
+    /**
+     * 公司+岗位 的归一化哈希（MD5，32 位十六进制），用于数据库级去重。
+     * 直接对 company+title 建联合唯一索引会超出 MySQL utf8mb4 的键长度限制，故用哈希列。
+     * 归一化：trim + 小写；哈希由 JobService 统一计算。
+     */
+    @Column(name = "title_hash", length = 32)
+    private String titleHash;
+
+    /** 软删除标记：删除岗位时不物理删除，保留投递记录与统计口径 */
+    @Column(nullable = false)
+    private boolean deleted = false;
 
     /** 省 / 直辖市（如 广东、北京） */
     @Column(length = 32)
@@ -110,6 +124,10 @@ public class Job {
     public void setCompany(String company) { this.company = company; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
+    public String getTitleHash() { return titleHash; }
+    public void setTitleHash(String titleHash) { this.titleHash = titleHash; }
+    public boolean isDeleted() { return deleted; }
+    public void setDeleted(boolean deleted) { this.deleted = deleted; }
     public String getProvince() { return province; }
     public void setProvince(String province) { this.province = province; }
     public String getCity() { return city; }

@@ -35,7 +35,11 @@ public class AiGreetingClient {
             "你是一位求职打招呼文案创作助手。根据提供的个人资料与岗位信息，直接写一段自然的打招呼话术。" +
             "只能使用资料里明确给出的事实，不得编造学校、学历、专业、技能、项目、实习月数或到岗时间。" +
             "话术中必须体现给定的实习月数与每周出勤天数，且不超过硬上限 12 个月、每周 7 天。" +
+            "月数与天数必须用阿拉伯数字书写（例如 3 个月、每周 4 天），不要写成“三个月”等中文数字。" +
             "不要输出建议文案，不要输出解释，只输出 JSON，格式为 {\"message\":\"话术正文\"}。";
+
+    /** 测试连接用的最小提示词，短小且固定，便于精确预估成本 */
+    public static final String TEST_PROMPT = "ping";
 
     private final SettingsService settings;
     private final ObjectMapper objectMapper;
@@ -60,7 +64,8 @@ public class AiGreetingClient {
                 + "要求：\n"
                 + "1. 保持学校、学历、专业、技能句、实习月数、每周天数、到岗时间不变。\n"
                 + "2. 只调整措辞和流畅度，不添加未提供的经历、项目或技能。\n"
-                + "3. 只输出 JSON：{\"message\":\"润色后的话术\"}，不要输出解释。\n\n"
+                + "3. 实习月数与每周天数必须用阿拉伯数字书写（如 3 个月、每周 4 天），不要写成中文数字。\n"
+                + "4. 只输出 JSON：{\"message\":\"润色后的话术\"}，不要输出解释。\n\n"
                 + "草稿：\n" + nullToEmpty(draft);
     }
 
@@ -74,6 +79,7 @@ public class AiGreetingClient {
                 .append("目标字数：").append(lo).append("-").append(hi).append(" 字。\n")
                 .append("只能使用下面【个人资料】与【岗位信息】中的事实，不得编造任何经历、项目或技能。\n")
                 .append("话术里必须自然体现【可实习月数】与【每周出勤天数】，不得改变这两个数字。\n")
+                .append("月数与天数必须用阿拉伯数字书写（如 3 个月、每周 4 天），不要写成中文数字。\n")
                 .append("不要写“建议”类内容，不要写解释，只输出 JSON：{\"message\":\"话术正文\"}。\n\n")
                 .append("【个人资料】\n")
                 .append("学校：").append(nz(v.get("schoolFull"))).append("\n")
@@ -198,16 +204,16 @@ public class AiGreetingClient {
     }
 
     /**
-     * 测试连接。使用传入的临时参数，不保存、不扣额度、不解析话术。
-     * 返回用户可读的结果描述。
+     * 测试连接。使用传入的临时参数，不保存参数；请求本身会产生真实 token 用量，
+     * 由调用方（SettingsController）按预检结果记账。返回用户可读结果与 token 用量。
      */
     public TestResult testConnection(String baseUrl, String model, String apiKey, Integer timeoutMs) {
         if (!StringUtils.hasText(baseUrl) || !StringUtils.hasText(model) || !StringUtils.hasText(apiKey)) {
-            return new TestResult(false, "接口地址、模型名或 API Key 未填写");
+            return TestResult.failure("接口地址、模型名或 API Key 未填写");
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model.trim());
-        body.put("messages", List.of(Map.of("role", "user", "content", "ping")));
+        body.put("messages", List.of(Map.of("role", "user", "content", TEST_PROMPT)));
         body.put("max_tokens", 1);
         body.put("stream", false);
 
@@ -217,23 +223,29 @@ public class AiGreetingClient {
             JsonNode root = objectMapper.readTree(response);
             if (root.hasNonNull("error")) {
                 String msg = root.path("error").path("message").asText(root.path("error").toString());
-                return new TestResult(false, "模型返回错误：" + msg);
+                return TestResult.failure("模型返回错误：" + msg);
             }
             if (root.path("choices").isArray() && !root.path("choices").isEmpty()) {
-                return new TestResult(true, "连接成功，模型可响应");
+                JsonNode usage = root.path("usage");
+                int promptTokens = usage.path("prompt_tokens").asInt(0);
+                int completionTokens = usage.path("completion_tokens").asInt(0);
+                int cacheHitTokens = parseCacheHitTokens(usage, promptTokens);
+                boolean usageReported = !usage.isMissingNode() && (promptTokens > 0 || completionTokens > 0);
+                return new TestResult(true, "连接成功，模型可响应",
+                        promptTokens, completionTokens, cacheHitTokens, usageReported);
             }
-            return new TestResult(false, "响应中未找到有效结果，请检查模型名");
+            return TestResult.failure("响应中未找到有效结果，请检查模型名");
         } catch (HttpClientErrorException.Unauthorized e) {
-            return new TestResult(false, "鉴权失败：API Key 不正确");
+            return TestResult.failure("鉴权失败：API Key 不正确");
         } catch (HttpClientErrorException e) {
-            return new TestResult(false, "请求被拒绝：" + e.getStatusCode().value() + "，请检查余额与权限");
+            return TestResult.failure("请求被拒绝：" + e.getStatusCode().value() + "，请检查余额与权限");
         } catch (HttpServerErrorException e) {
-            return new TestResult(false, "服务暂时不可用：" + e.getStatusCode().value());
+            return TestResult.failure("服务暂时不可用：" + e.getStatusCode().value());
         } catch (ResourceAccessException e) {
-            return new TestResult(false, "连接失败：请检查网络或 Base URL");
+            return TestResult.failure("连接失败：请检查网络或 Base URL");
         } catch (Exception e) {
             log.warn("测试连接失败：{}", e.getMessage());
-            return new TestResult(false, "测试失败：" + e.getMessage());
+            return TestResult.failure("测试失败：" + e.getMessage());
         }
     }
 
@@ -305,6 +317,12 @@ public class AiGreetingClient {
                            int cacheHitTokens, boolean usageReported) {
     }
 
-    public record TestResult(boolean success, String message) {
+    public record TestResult(boolean success, String message,
+                             int promptTokens, int completionTokens,
+                             int cacheHitTokens, boolean usageReported) {
+        /** 失败结果：没有产生有效用量，token 计数为 0 */
+        public static TestResult failure(String message) {
+            return new TestResult(false, message, 0, 0, 0, false);
+        }
     }
 }

@@ -42,7 +42,11 @@ public class DataInitializer {
                 log.info("话术规则已存在 {} 条，跳过初始化", repository.count());
             }
 
-            // 回填历史岗位的 省/市/区 与 时长/日薪
+            // 先清理存量重复并回填去重哈希（唯一索引依赖此步），再回填其它字段
+            int prepared = jobService.prepareUniqueIndex();
+            if (prepared > 0) {
+                log.info("岗位去重索引准备完成：处理 {} 条", prepared);
+            }
             int fixed = jobService.backfill();
             if (fixed > 0) {
                 log.info("回填省市区/时长日薪完成：{} 条", fixed);

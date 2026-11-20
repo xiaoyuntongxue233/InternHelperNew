@@ -38,9 +38,10 @@ public class StatsService {
         map.put("todayTotal", todayTotal);
         map.put("totalSuccess", totalSuccess);
         map.put("successRate", todayTotal == 0 ? 0 : Math.round(todaySuccess * 1000.0 / todayTotal) / 10.0);
-        map.put("jobTotal", jobRepository.count());
-        map.put("jobNew", jobRepository.countByStatus("NEW"));
-        map.put("jobContacted", jobRepository.countByStatus("CONTACTED"));
+        // 软删除的岗位不计入岗位库统计；投递记录仍保留，历史成功率不受影响
+        map.put("jobTotal", jobRepository.countByDeletedFalse());
+        map.put("jobNew", jobRepository.countByStatusAndDeletedFalse("NEW"));
+        map.put("jobContacted", jobRepository.countByStatusAndDeletedFalse("CONTACTED"));
         return map;
     }
 

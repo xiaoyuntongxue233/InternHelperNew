@@ -5,9 +5,15 @@ import com.zhou.internhelper.repository.JobRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import jakarta.persistence.TypedQuery;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +22,8 @@ import java.util.Set;
 
 @Service
 public class JobService {
+
+    private static final Logger log = LoggerFactory.getLogger(JobService.class);
 
     /** 允许排序的字段白名单，避免前端传乱七八糟的字段进来 */
     private static final Set<String> SORTABLE = Set.of("months", "days", "dailyMin", "dailyMax", "id", "company", "status");
@@ -36,7 +44,8 @@ public class JobService {
     };
 
     private static final String BASE_WHERE = """
-            where (:status is null or j.status = :status)
+            where j.deleted = false
+              and (:status is null or j.status = :status)
               and (:province is null or j.province = :province)
               and (:city is null or j.city = :city)
               and (:district is null or j.district = :district)
@@ -160,11 +169,48 @@ public class JobService {
                 .orElseThrow(() -> new IllegalArgumentException("岗位不存在：" + id));
     }
 
+    private static final Set<String> STATUSES = Set.of("NEW", "CONTACTED", "SKIPPED");
+    private static final Set<String> CATEGORIES = Set.of("INTERN", "FULLTIME");
+    private static final Set<String> SALARY_TYPES = Set.of("DAILY", "MONTHLY");
+
+    /** 校验必填与枚举字段；blankPatch=true 时只校验传入的非 null 字段（用于 update） */
+    private void validateJob(Job job, boolean blankPatch) {
+        if (!blankPatch || job.getCompany() != null) {
+            if (job.getCompany() == null || job.getCompany().isBlank()) {
+                throw new IllegalArgumentException("公司不能为空");
+            }
+        }
+        if (!blankPatch || job.getTitle() != null) {
+            if (job.getTitle() == null || job.getTitle().isBlank()) {
+                throw new IllegalArgumentException("岗位不能为空");
+            }
+        }
+        if (job.getStatus() != null && !STATUSES.contains(job.getStatus())) {
+            throw new IllegalArgumentException("岗位状态只能是 NEW / CONTACTED / SKIPPED");
+        }
+        if (job.getCategory() != null && !CATEGORIES.contains(job.getCategory())) {
+            throw new IllegalArgumentException("岗位类型只能是 INTERN / FULLTIME");
+        }
+        if (job.getSalaryType() != null && !SALARY_TYPES.contains(job.getSalaryType())) {
+            throw new IllegalArgumentException("薪资类型只能是 DAILY / MONTHLY");
+        }
+        if (job.getMonths() != null && (job.getMonths() < 1 || job.getMonths() > 24)) {
+            throw new IllegalArgumentException("实习月数需在 1–24 之间");
+        }
+        if (job.getDays() != null && (job.getDays() < 1 || job.getDays() > 7)) {
+            throw new IllegalArgumentException("每周出勤需在 1–7 天之间");
+        }
+    }
+
     @Transactional
     public Job create(Job job) {
-        if (jobRepository.existsByCompanyAndTitle(job.getCompany(), job.getTitle())) {
+        validateJob(job, false);
+        String hash = titleHash(job.getCompany(), job.getTitle());
+        if (jobRepository.findByTitleHashAndDeletedFalse(hash).isPresent()
+                || jobRepository.existsByCompanyAndTitleAndDeletedFalse(job.getCompany(), job.getTitle())) {
             throw new IllegalArgumentException("该公司的这个岗位已存在：" + job.getCompany() + " / " + job.getTitle());
         }
+        job.setTitleHash(hash);
         normalizeRegion(job);
         applySalary(job);
         applyMeta(job);
@@ -175,9 +221,17 @@ public class JobService {
     /** 修改岗位：只覆盖传入的字段，返回更新后的对象 */
     @Transactional
     public Job update(Long id, Job patch) {
+        validateJob(patch, true);
         Job job = get(id);
         if (patch.getCompany() != null) job.setCompany(patch.getCompany());
         if (patch.getTitle() != null) job.setTitle(patch.getTitle());
+        // 改名后重新查重（排除自身）：堵住编辑绕过去重
+        String hash = titleHash(job.getCompany(), job.getTitle());
+        var existing = jobRepository.findByTitleHashAndDeletedFalse(hash);
+        if (existing.isPresent() && !existing.get().getId().equals(id)) {
+            throw new IllegalArgumentException("该公司的这个岗位已存在：" + job.getCompany() + " / " + job.getTitle());
+        }
+        job.setTitleHash(hash);
         if (patch.getRawLocation() != null) {
             job.setRawLocation(patch.getRawLocation());
             normalizeRegion(job);
@@ -219,14 +273,16 @@ public class JobService {
         return jobRepository.save(job);
     }
 
-    /** 删除岗位 */
+    /** 删除岗位：软删除，保留投递记录与统计口径；清空 titleHash 释放唯一键，允许同名重建 */
     @Transactional
     public void delete(Long id) {
         Job job = get(id);
-        jobRepository.delete(job);
+        job.setDeleted(true);
+        job.setTitleHash(null);
+        jobRepository.save(job);
     }
 
-    /** 导入：按 公司+岗位 去重，顺便拆地点、抽时长和日薪 */
+    /** 导入：按 公司+岗位 去重（含哈希），顺便拆地点、抽时长和日薪 */
     @Transactional
     public int importJobs(List<Job> jobs) {
         int added = 0;
@@ -234,9 +290,12 @@ public class JobService {
             if (job.getCompany() == null || job.getTitle() == null) {
                 continue;
             }
-            if (jobRepository.existsByCompanyAndTitle(job.getCompany(), job.getTitle())) {
+            String hash = titleHash(job.getCompany(), job.getTitle());
+            if (jobRepository.findByTitleHashAndDeletedFalse(hash).isPresent()
+                    || jobRepository.existsByCompanyAndTitleAndDeletedFalse(job.getCompany(), job.getTitle())) {
                 continue;
             }
+            job.setTitleHash(hash);
             normalizeRegion(job);
             applySalary(job);
             applyMeta(job);
@@ -335,22 +394,94 @@ public class JobService {
         return low == high ? low + "元/月" : low + "-" + high + "元/月";
     }
 
+    /**
+     * 启动时一次性数据治理，全部在 Java 层完成，不依赖窗口函数或 md5() 等方言，兼容 MySQL 5.7。
+     * 分三阶段且顺序不可颠倒（阶段间 flush，避免唯一键短暂冲突）：
+     *   1) 清空所有软删行的 titleHash，释放唯一键（含历史遗留数据）；
+     *   2) 只对活跃行按公司+岗位分组，保留 id 最小者，其余重复行改为软删+清 hash（保留投递记录引用）；
+     *   3) 回填保留下来的活跃行 titleHash。
+     */
+    @Transactional
+    public int prepareUniqueIndex() {
+        // 阶段 1：释放软删行占用的唯一键
+        List<Job> deletedRows = jobRepository.findByDeletedTrue();
+        int released = 0;
+        for (Job job : deletedRows) {
+            if (job.getTitleHash() != null) {
+                job.setTitleHash(null);
+                jobRepository.save(job);
+                released++;
+            }
+        }
+        if (released > 0) {
+            entityManager.flush();
+            log.info("释放存量软删岗位的唯一哈希 {} 条", released);
+        }
+
+        // 阶段 2：活跃行去重。只处理未删除岗位，避免把软删行当成保留者而误删活跃行
+        List<Job> active = jobRepository.findByDeletedFalse();
+        Map<String, List<Job>> groups = new LinkedHashMap<>();
+        for (Job job : active) {
+            String key = normalizeKey(job.getCompany(), job.getTitle());
+            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(job);
+        }
+        int softDeleted = 0;
+        List<Job> survivors = new ArrayList<>();
+        for (List<Job> group : groups.values()) {
+            Job keep = group.stream().min(java.util.Comparator.comparing(Job::getId)).orElse(group.get(0));
+            survivors.add(keep);
+            for (Job job : group) {
+                if (!job.getId().equals(keep.getId())) {
+                    // 物理删除会留下孤儿投递记录，改为软删 + 清 hash
+                    job.setDeleted(true);
+                    job.setTitleHash(null);
+                    jobRepository.save(job);
+                    softDeleted++;
+                }
+            }
+        }
+        if (softDeleted > 0) {
+            entityManager.flush();
+            log.warn("软删归档存量重复岗位 {} 条（每组保留 id 最小者）", softDeleted);
+        }
+
+        // 阶段 3：回填保留下来的活跃行
+        int filled = 0;
+        for (Job job : survivors) {
+            String hash = titleHash(job.getCompany(), job.getTitle());
+            if (!hash.equals(job.getTitleHash())) {
+                job.setTitleHash(hash);
+                jobRepository.save(job);
+                filled++;
+            }
+        }
+        if (filled > 0) {
+            log.info("回填岗位去重哈希 {} 条", filled);
+        }
+        return released + softDeleted + filled;
+    }
+
+    private String normalizeKey(String company, String title) {
+        return (company == null ? "" : company.trim().toLowerCase())
+                + "|" + (title == null ? "" : title.trim().toLowerCase());
+    }
+
     /** 启动时回填历史数据 */
     @Transactional
     public int backfill() {
-        List<Job> regionList = jobRepository.findByProvinceIsNull();
+        List<Job> regionList = jobRepository.findByProvinceIsNullAndDeletedFalse();
         for (Job job : regionList) {
             normalizeRegion(job);
         }
         jobRepository.saveAll(regionList);
 
-        List<Job> metaList = jobRepository.findByMonthsIsNull();
+        List<Job> metaList = jobRepository.findByMonthsIsNullAndDeletedFalse();
         for (Job job : metaList) {
             applyMeta(job);
         }
         jobRepository.saveAll(metaList);
 
-        List<Job> salaryList = jobRepository.findByDailyMinIsNull();
+        List<Job> salaryList = jobRepository.findByDailyMinIsNullAndDeletedFalse();
         for (Job job : salaryList) {
             if (job.getSalaryType() != null && job.getSalaryMin() != null) {
                 applySalary(job);
@@ -365,7 +496,7 @@ public class JobService {
         jobRepository.saveAll(salaryList);
 
         // 岗位类型（实习 / 社招）重新判定
-        List<Job> all = jobRepository.findAll();
+        List<Job> all = jobRepository.findByDeletedFalse();
         for (Job job : all) {
             String before = job.getCategory();
             classify(job);
@@ -376,6 +507,22 @@ public class JobService {
         return regionList.size() + metaList.size() + salaryList.size();
     }
 
+    /** 公司+岗位 归一化哈希：trim + 小写后用 MD5，避免联合唯一索引超长 */
+    private String titleHash(String company, String title) {
+        String key = (company == null ? "" : company.trim().toLowerCase())
+                + "|" + (title == null ? "" : title.trim().toLowerCase());
+        try {
+            byte[] bytes = MessageDigest.getInstance("MD5").digest(key.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(32);
+            for (byte b : bytes) {
+                sb.append(String.format("%02x", b & 0xff));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("MD5 不可用", e);
+        }
+    }
+
     @Transactional
     public Job updateStatus(Long id, String status) {
         Job job = get(id);
@@ -384,11 +531,11 @@ public class JobService {
     }
 
     public long countByStatus(String status) {
-        return jobRepository.countByStatus(status);
+        return jobRepository.countByStatusAndDeletedFalse(status);
     }
 
     public List<Job> listPending() {
-        return jobRepository.findByStatus("NEW");
+        return jobRepository.findByStatusAndDeletedFalse("NEW");
     }
 
     private String blankToNull(String s) {

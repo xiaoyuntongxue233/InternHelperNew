@@ -1,0 +1,12 @@
+# 技术词校验词典：话术中出现但个人资料未提供的技术词会被判为幻觉并回退模板。
+# 一行一个或用逗号/空格分隔多行；# 开头为注释。归一化时会转小写并去除空格与 -_·. 等分隔符。
+# 修改本文件后需重启应用（词典在构造时加载一次）。
+
+java python c++ c# go golang rust scala kotlin php nodejs
+springboot springboot3 springcloud springmvc mybatis hibernate
+mysql postgresql oracle mongodb redis memcached elasticsearch
+kafka rabbitmq rocketmq zookeeper dubbo nacos kubernetes docker
+jenkins nginx linux git hadoop spark flink hive hbase
+flask django fastapi tensorflow pytorch
+vue react angular typescript javascript html css webpack
+android ios flutter unity aiagent llm rag prompt

@@ -61,6 +61,8 @@ public class GreetingService {
     private final AiQuotaService quota;
     private final GreetingProperties greetingProperties;
     private final SettingsService settings;
+    /** 事实校验器：词典在构造时加载一次，重启生效 */
+    private final GreetingValidator validator = new GreetingValidator();
 
     /** 规则正则缓存：key 为规则 id，value 含原始正则；数据库里的正则变了会自动失效 */
     private final ConcurrentHashMap<Long, CachedPattern> patternCache = new ConcurrentHashMap<>();
@@ -137,7 +139,9 @@ public class GreetingService {
         String prompt = aiClient.buildFreeUserPrompt(facts.variables(), facts.style(), facts.minLen(), facts.maxLen());
         BigDecimal estimate = quota.estimateCost(prompt);
 
-        if (!quota.canSpend(estimate)) {
+        // 预检 + 并发预留；返回 null 表示拒绝调用
+        BigDecimal reserved = quota.reserve(estimate);
+        if (reserved == null) {
             warnings.add("默认额度已用完，已使用内置模板生成；如需更多生成，请自行接入 API。");
             return finishAi(fallbackDraft, facts, "free", warnings, true, s);
         }
@@ -147,14 +151,17 @@ public class GreetingService {
             Validation validation = validate(result.message(), facts);
             warnings.addAll(validation.warnings());
             if (!validation.ok()) {
+                quota.release(reserved);
                 warnings.add("模型输出未通过校验。");
                 return finishAi(fallbackDraft, facts, "free", warnings, false, s);
             }
             quota.charge(job.getId(), "free", result.promptTokens(), result.cacheHitTokens(),
                     result.completionTokens(), result.usageReported(), estimate, greetingProperties.getPromptVersion());
+            quota.release(reserved);
             return new Greeting(result.message(), facts.direction(), facts.months(), facts.days(),
                     ADVICE, "AI", "free", warnings, false);
         } catch (Exception e) {
+            quota.release(reserved);
             log.warn("AI 自由生成失败，回退模板：{}", e.getMessage());
             warnings.add("AI 自由生成失败：" + e.getMessage());
             return finishAi(fallbackDraft, facts, "free", warnings, false, s);
@@ -167,7 +174,9 @@ public class GreetingService {
         String prompt = aiClient.buildUserPrompt(draft, facts.style(), facts.minLen(), facts.maxLen());
         BigDecimal estimate = quota.estimateCost(prompt);
 
-        if (!quota.canSpend(estimate)) {
+        // 预检 + 并发预留；返回 null 表示拒绝调用
+        BigDecimal reserved = quota.reserve(estimate);
+        if (reserved == null) {
             warnings.add("默认额度已用完，已使用内置模板生成；如需更多生成，请自行接入 API。");
             return finishAi(draft, facts, templateId, warnings, true, s);
         }
@@ -177,14 +186,17 @@ public class GreetingService {
             Validation validation = validate(result.message(), facts);
             warnings.addAll(validation.warnings());
             if (!validation.ok()) {
+                quota.release(reserved);
                 warnings.add("模型输出未通过校验。");
                 return finishAi(draft, facts, templateId, warnings, false, s);
             }
             quota.charge(job.getId(), templateId, result.promptTokens(), result.cacheHitTokens(),
                     result.completionTokens(), result.usageReported(), estimate, greetingProperties.getPromptVersion());
+            quota.release(reserved);
             return new Greeting(result.message(), facts.direction(), facts.months(), facts.days(),
                     ADVICE, "AI", templateId, warnings, false);
         } catch (Exception e) {
+            quota.release(reserved);
             log.warn("AI 话术生成失败：{}", e.getMessage());
             warnings.add("AI 生成失败：" + e.getMessage());
             return finishAi(draft, facts, templateId, warnings, false, s);
@@ -203,30 +215,11 @@ public class GreetingService {
                 ADVICE, "AI", templateId, warnings, quotaExceeded);
     }
 
+    /** 委托给独立校验器：数值精确匹配 + 技能白名单 + AI 提及开关 + 字数/学校/学历 */
     private Validation validate(String message, Facts facts) {
-        if (!StringUtils.hasText(message)) {
-            return new Validation(false, List.of("模型输出为空"));
-        }
-        String text = message.trim();
-        int len = text.length();
-        if (len < facts.minLen() * 0.8 || len > facts.maxLen() * 1.2) {
-            return new Validation(false, List.of("输出字数明显偏离目标区间：" + len + " 字"));
-        }
-        List<String> warnings = new ArrayList<>();
-        if (len < facts.minLen() || len > facts.maxLen()) {
-            warnings.add("字数略超目标区间：" + len + " 字");
-        }
-        Map<String, String> v = facts.variables();
-        if (!containsAny(text, v.get("school"), v.get("schoolShort"))) {
-            return new Validation(false, List.of("输出中缺少学校信息"));
-        }
-        if (!containsAny(text, v.get("degreeLabel"))) {
-            return new Validation(false, List.of("输出中缺少学历信息"));
-        }
-        if (!text.contains(String.valueOf(facts.months())) || !text.contains(String.valueOf(facts.days()))) {
-            return new Validation(false, List.of("输出中的实习月数或出勤天数与事实不一致"));
-        }
-        return new Validation(true, warnings);
+        GreetingValidator.Result r = validator.validate(message, facts.variables(),
+                facts.months(), facts.days(), facts.minLen(), facts.maxLen());
+        return new Validation(r.ok(), r.warnings());
     }
 
     private Facts buildFacts(Job job, CandidateProfile profileOverride, String styleOverride,
@@ -411,17 +404,6 @@ public class GreetingService {
         return "";
     }
 
-    private boolean containsAny(String text, String... candidates) {
-        if (candidates == null) {
-            return false;
-        }
-        for (String c : candidates) {
-            if (StringUtils.hasText(c) && text.contains(c)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     private String nullToEmpty(String s) {
         return s == null ? "" : s;
