@@ -108,7 +108,7 @@ export DEEPSEEK_PRICE_OUTPUT_PER_1M=输出单价_元每百万token
 
 # 3. 打包 & 启动
 mvn clean package -DskipTests
-java -jar target/intern-helper-0.11.jar
+java -jar target/intern-helper-0.11.1.jar
 
 # 4. 打开页面
 http://localhost:12231
@@ -119,7 +119,7 @@ Windows PowerShell：
 ```powershell
 $env:MYSQL_PASSWORD="你的密码"
 $env:CANDIDATE_SCHOOL="你的学校"
-java -jar target\intern-helper-0.11.jar
+java -jar target\intern-helper-0.11.1.jar
 ```
 
 示例数据导入：
@@ -255,6 +255,7 @@ Controller 只做参数接收和组装，业务在 Service，数据访问在 Rep
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
+| v0.11.1 | 2026-11-21 | 修复新功能测试发现的批量操作前端失效、批量改状态 500、保存编辑失效、历史选用偶发失效；补强批量端点异常输入、超长话术、非法 ID 错误键、跨页选择提示 |
 | v0.11 | 2026-11-20 | 用户体验：toast 与自定义确认框替代原生弹窗、批量操作、「标记已投」改为状态下拉（已投递/未投递/已跳过）+ 键盘快捷键、话术可编辑与版本历史 + 复制兜底 |
 | v0.10.4 | 2026-11-20 | 统一地点字段、完善薪资解析、扩展出勤正则、url 协议校验与 invalid 计数、cursor 越界校验；字数边界标注为仅 AI 生效并在设置页提供字数限制与推荐值 |
 | v0.10.3 | 2026-11-20 | 修复了存储型 XSS、参数错误 400/404、本机绑定、技能句责任边界、移动端响应式、投递记录管理、薪资与字数校验、409/405 映射、安全响应头、核对提示前置黄条、记录删除语义与 limit、LIKE 通配符转义、sort/order 严格校验 |
@@ -272,6 +273,20 @@ Controller 只做参数接收和组装，业务在 Service，数据访问在 Rep
 | v0.3 | 2026-11-16 | 跳转到指定页、三列可排序、手动新增岗位页、薪资格式统一折算 |
 | v0.2 | 2026-11-16 | 省 / 市 / 区三级筛选、游标分页、导入批次留痕与自动入库 |
 | v0.1 | 2026-11-16 | 首个版本：岗位库、话术生成、投递记录与统计 |
+
+### v0.11.1（2026-11-21）
+
+**主题：修复新功能测试发现的阻断性缺陷，并补强批量端点的异常输入处理。**
+
+- **批量操作前端失效**：`api(path)` 改为 `api(path, options)` 透传 method/body 给 `fetch`。原实现只收路径一个参数，method/body 被丢弃导致四个批量端点全发 GET、单条"保存编辑"的 PUT 退化为 GET；错误响应改从 JSON 提取后端 `message`。
+- **批量改状态 500**：请求体改用 record `BatchStatusRequest(List<Long> ids, String status)`。原 `Map<String,Object>` 下 Jackson 把整数推断为 `Integer`，遍历时 `ClassCastException`。
+- **保存编辑字数提示错误**：与前端失效同源（PUT 退化为 GET 命中"生成话术"，99 字是生成结果），随 `api()` 修复自动闭环。
+- **历史版本选用偶发失效**：改用 `data-vtext` 属性承载文本 + 事件委托，不再依赖 `onclick` 字符串选择器。
+- **快捷键可发现性**：批量工具栏新增"⌨ 快捷键"展开面板，列出全部快捷键。
+- **批量端点异常输入**：四个批量端点的 errors 统一为字符串键的 Map，过滤 ids 中的 null 元素（原 null key 使 Jackson 序列化失败 → 500）。
+- **超长话术**：投递记录 message 列扩至 2000 字（与话术保存校验一致）；批量标记已投增加前置长度校验，超限写入 errors 不落库。
+- **非法 ID 错误键**：由数组索引改为原始 ID 字符串，文案统一中文，不再透传原生异常。
+- **跨页选择提示**：翻页重建列表后同步批量栏计数与实际选中，避免提示误导。
 
 ### v0.11（2026-11-20）
 

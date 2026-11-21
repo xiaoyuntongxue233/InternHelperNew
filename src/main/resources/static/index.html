@@ -72,6 +72,9 @@
     .hist-item .hmeta { color: #889; flex: 1; }
     .hist-item .htext { color: #445; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .kbd-hint { font-size: 11px; color: #889; }
+    .shortcut-panel { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12px; color: #556; background: #f7f9fa; border: 1px solid #e4e9ec; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
+    .shortcut-panel b { color: #334; }
+    .shortcut-panel kbd { display: inline-block; min-width: 16px; text-align: center; padding: 1px 5px; font-size: 11px; font-family: inherit; color: #2c6; background: #fff; border: 1px solid #ccd4d8; border-bottom-width: 2px; border-radius: 4px; }
 
     /* ===== 移动端适配：窄屏表格转卡片 ===== */
     @media (max-width: 768px) {
@@ -154,7 +157,18 @@
     <button onclick="batchChangeStatus()">应用状态</button>
     <button class="danger" onclick="batchDelete()">批量删除</button>
     <button onclick="clearSelection()">取消选择</button>
+    <button onclick="toggleShortcuts()" title="键盘快捷键">⌨ 快捷键</button>
     <span class="muted" id="batchMsg"></span>
+  </div>
+  <div class="shortcut-panel" id="shortcutPanel" style="display:none">
+    <b>键盘快捷键</b>（焦点不在输入框时生效）：
+    <span><kbd>j</kbd>/<kbd>k</kbd> 上/下移行</span>
+    <span><kbd>g</kbd> 生成话术</span>
+    <span><kbd>c</kbd> 复制话术</span>
+    <span><kbd>s</kbd> 设为已投递</span>
+    <span><kbd>x</kbd> 勾选/取消当前行</span>
+    <span><kbd>/</kbd> 聚焦搜索框</span>
+    <span><kbd>Esc</kbd> 关闭确认框</span>
   </div>
 
   <table>
@@ -229,9 +243,17 @@
   let sortField = null;
   let sortOrder = 'desc';
 
-  async function api(path) {
-    const res = await fetch(path);
-    if (!res.ok) throw new Error('请求失败 ' + res.status);
+  async function api(path, options) {
+    const res = await fetch(path, options);
+    if (!res.ok) {
+      // 优先显示后端 message（全局异常处理器返回 {code,message}），否则退回状态码
+      let msg = '请求失败 ' + res.status;
+      try {
+        const d = await res.json();
+        if (d && d.message) msg = d.message;
+      } catch (_) { /* 非 JSON 响应（如 405 的空响应）保留状态码文案 */ }
+      throw new Error(msg);
+    }
     return res.json();
   }
 
@@ -363,6 +385,8 @@
       trG.innerHTML = `<td colspan="11" style="padding:0 12px 3px 12px"><div class="greet" id="g-${job.id}"></div></td>`;
       rows.appendChild(trG);
     });
+    // 翻页/筛选后 DOM 重建，复选框选择随行销毁；同步批量栏计数与实际选中，避免提示误导
+    syncSelection();
     refreshStats();
   }
 
@@ -496,24 +520,20 @@
         <div class="hist-item">
           <span class="hmeta">${esc(String(v.createdAt || '').replace('T', ' ').slice(0, 16))} · ${esc(v.source || v.engine || '-')} · ${(v.message || '').length}字</span>
           <span class="htext" title="${esc(v.message || '')}">${esc(v.message || '')}</span>
-          <button onclick="useVersion(${id}, ${v.id})">选用</button>
+          <button class="use-ver" data-vtext="${esc(v.message || '')}">选用</button>
         </div>`).join('');
+      // 在 box 上做一次事件委托：不依赖 onclick 字符串选择器与 DOM 层级，
+      // 列表重渲染后重新绑定即可始终指向当前按钮。
+      box.onclick = function (e) {
+        const btn = e.target.closest('.use-ver');
+        if (!btn) return;
+        const ta = document.getElementById('msg-' + id);
+        if (!ta) return;
+        ta.value = btn.getAttribute('data-vtext') || '';
+        onGreetEdit(id);
+        toast('已选用该版本，可继续编辑');
+      };
     } catch (e) { box.textContent = '读取失败：' + e.message; }
-  }
-
-  // 选用历史版本：纯前端行为，把该版本文本填回编辑框并同步 dataset.message
-  function useVersion(id, versionId) {
-    const box = document.getElementById('hist-' + id);
-    const ta = document.getElementById('msg-' + id);
-    if (!box || !ta) return;
-    const btn = box.querySelector('button[onclick="useVersion(' + id + ',' + versionId + ')"]');
-    const row = btn ? btn.closest('.hist-item') : null;
-    const textEl = row ? row.querySelector('.htext') : null;
-    if (!textEl) return;
-    const text = textEl.getAttribute('title') || '';
-    ta.value = text;
-    onGreetEdit(id);
-    toast('已选用该版本，可继续编辑');
   }
 
   async function fetchGreet(id, force) {
@@ -730,6 +750,11 @@
     const selAll = document.getElementById('selAll');
     if (selAll) selAll.checked = false;
     syncSelection();
+  }
+
+  function toggleShortcuts() {
+    const p = document.getElementById('shortcutPanel');
+    if (p) p.style.display = (p.style.display === 'none') ? 'flex' : 'none';
   }
 
   async function batchCall(url, body, okMsg) {
