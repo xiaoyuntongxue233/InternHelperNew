@@ -7,6 +7,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 额度控制。首期按本机实例计量，userKey 固定为 local。
@@ -154,6 +157,49 @@ public class AiQuotaService {
     }
 
     /**
+     * 自带 Key 的金额消耗量（按当前配置的单价和已记录的 token 估算）。
+     * BYO 调用不扣平台额度，历史记录的 costCny 固定为 0，因此这里从 token 重新计算，
+     * 便于用户了解自己的 Key 大约花了多少钱。
+     */
+    public Map<String, Object> byoUsage() {
+        List<AiUsage> rows = repository.findByUserKeyAndMode(LOCAL_USER, "BYO");
+        BigDecimal total = BigDecimal.ZERO;
+        for (AiUsage row : rows) {
+            total = total.add(estimatedCostCny(row));
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("calls", rows.size());
+        result.put("usedCny", total.setScale(4, RoundingMode.HALF_UP).toPlainString());
+        return result;
+    }
+
+    /** 按当前单价估算单条用量金额；PLATFORM 与 BYO 展示统一口径 */
+    public BigDecimal estimatedCostCny(AiUsage row) {
+        if (row == null) {
+            return BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP);
+        }
+        return costFromTokens(nullToZero(row.getPromptTokens()),
+                nullToZero(row.getCacheHitTokens()), nullToZero(row.getCompletionTokens()));
+    }
+
+    private int nullToZero(Integer value) {
+        return value == null ? 0 : Math.max(0, value);
+    }
+
+    private BigDecimal costFromTokens(int promptTokens, int cacheHitTokens, int completionTokens) {
+        SettingsService.SettingsSnapshot s = snap();
+        int hit = Math.max(0, Math.min(cacheHitTokens, promptTokens));
+        int miss = Math.max(0, promptTokens - hit);
+        BigDecimal hitCost = BigDecimal.valueOf(hit)
+                .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(s.effectiveHitPrice());
+        BigDecimal missCost = BigDecimal.valueOf(miss)
+                .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(s.effectiveMissPrice());
+        BigDecimal outputCost = BigDecimal.valueOf(completionTokens)
+                .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(s.effectiveOutputPrice());
+        return hitCost.add(missCost).add(outputCost).setScale(4, RoundingMode.HALF_UP);
+    }
+
+    /**
      * 调用后记账。模型返回 usage 时按实际扣费；未返回时按预检的保守金额扣费。
      * 模式取当前快照，供话术生成路径使用。
      */
@@ -199,15 +245,7 @@ public class AiQuotaService {
             return BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP);
         }
         if (usageReported && snap().highestUnitPrice().signum() > 0) {
-            int hit = Math.max(0, Math.min(cacheHitTokens, promptTokens));
-            int miss = Math.max(0, promptTokens - hit);
-            BigDecimal hitCost = BigDecimal.valueOf(hit)
-                    .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(snap().effectiveHitPrice());
-            BigDecimal missCost = BigDecimal.valueOf(miss)
-                    .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(snap().effectiveMissPrice());
-            BigDecimal outputCost = BigDecimal.valueOf(completionTokens)
-                    .divide(MILLION, 6, RoundingMode.HALF_UP).multiply(snap().effectiveOutputPrice());
-            return hitCost.add(missCost).add(outputCost).setScale(4, RoundingMode.HALF_UP);
+            return costFromTokens(promptTokens, cacheHitTokens, completionTokens);
         }
         return estimatedCost == null ? BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP)
                 : estimatedCost.setScale(4, RoundingMode.HALF_UP);

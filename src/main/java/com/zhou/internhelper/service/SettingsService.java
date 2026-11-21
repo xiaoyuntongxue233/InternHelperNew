@@ -28,6 +28,9 @@ public class SettingsService {
     private static final BigDecimal MILLION = BigDecimal.valueOf(1_000_000);
 
     private static final String BYO_KEY = "ai.byo-api-key";
+    private static final String THEME_KEY = "ui.theme";
+    private static final String FOLLOW_THEME_KEY = "ui.follow-system-theme";
+    private static final List<String> THEMES = List.of("grass", "blue", "dark", "coffee");
 
     private final AppSettingRepository repository;
     private final AiProperties ai;
@@ -66,6 +69,8 @@ public class SettingsService {
         seed("ai.price-output-per-1m", str(ai.getPriceOutputPer1m()));
         seed("ai.timeout-ms", String.valueOf(ai.getTimeoutMs()));
         seed("ai.max-tokens", String.valueOf(ai.getMaxTokens()));
+        seed(THEME_KEY, "grass");
+        seed(FOLLOW_THEME_KEY, "false");
         refresh();
     }
 
@@ -113,7 +118,9 @@ public class SettingsService {
             Map.entry("priceInputCacheHitPer1m", "ai.price-input-cache-hit-per-1m"),
             Map.entry("priceInputCacheMissPer1m", "ai.price-input-cache-miss-per-1m"),
             Map.entry("priceOutputPer1m", "ai.price-output-per-1m"),
-            Map.entry("apiKey", "ai.byo-api-key")
+            Map.entry("apiKey", "ai.byo-api-key"),
+            Map.entry("theme", THEME_KEY),
+            Map.entry("followSystemTheme", FOLLOW_THEME_KEY)
     );
 
     private String canonicalKey(String key) {
@@ -165,11 +172,13 @@ public class SettingsService {
 
         int timeoutMs = parseInt(values.get("ai.timeout-ms"), ai.getTimeoutMs(), 1000, 120000);
         int maxTokens = parseInt(values.get("ai.max-tokens"), ai.getMaxTokens(), 50, 4000);
+        String theme = normalizeTheme(values.get(THEME_KEY));
+        boolean followSystemTheme = "true".equalsIgnoreCase(values.get(FOLLOW_THEME_KEY));
 
         snapshot = new SettingsSnapshot(engine, template, autoFallback, baseUrl, model,
                 keySource, byoApiKey, nullToEmpty(ai.getPlatformApiKey()),
                 input, hit, miss, output, timeoutMs, maxTokens,
-                billing.getDefaultBudgetCny());
+                billing.getDefaultBudgetCny(), theme, followSystemTheme);
     }
 
     /** 公开给controller用于校验，不落库 */
@@ -222,6 +231,16 @@ public class SettingsService {
                 case "ai.byo-api-key" -> {
                     if (value.length() > 512) {
                         throw new IllegalArgumentException("API Key 过长");
+                    }
+                }
+                case THEME_KEY -> {
+                    if (!THEMES.contains(value.toLowerCase())) {
+                        throw new IllegalArgumentException("主题只能是 grass / blue / dark / coffee");
+                    }
+                }
+                case FOLLOW_THEME_KEY -> {
+                    if (!List.of("true", "false").contains(value.toLowerCase())) {
+                        throw new IllegalArgumentException("系统主题跟随只能是 true / false");
                     }
                 }
                 case "ai.timeout-ms" -> parseInt(value, ai.getTimeoutMs(), 1000, 120000);
@@ -292,6 +311,13 @@ public class SettingsService {
         return "concise";
     }
 
+    private String normalizeTheme(String value) {
+        if (value != null && THEMES.contains(value.toLowerCase())) {
+            return value.toLowerCase();
+        }
+        return "grass";
+    }
+
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
@@ -310,7 +336,21 @@ public class SettingsService {
                                    String byoApiKey, String platformApiKey,
                                    BigDecimal inputPricePer1m, BigDecimal hitPricePer1m,
                                    BigDecimal missPricePer1m, BigDecimal outputPricePer1m,
-                                   int timeoutMs, int maxTokens, BigDecimal budgetCny) {
+                                   int timeoutMs, int maxTokens, BigDecimal budgetCny,
+                                   String theme, boolean followSystemTheme) {
+
+        /** 兼容既有单测与旧调用：默认草绿主题、不跟随系统 */
+        public SettingsSnapshot(String engine, String template, boolean autoFallback,
+                                String baseUrl, String model, String keySource,
+                                String byoApiKey, String platformApiKey,
+                                BigDecimal inputPricePer1m, BigDecimal hitPricePer1m,
+                                BigDecimal missPricePer1m, BigDecimal outputPricePer1m,
+                                int timeoutMs, int maxTokens, BigDecimal budgetCny) {
+            this(engine, template, autoFallback, baseUrl, model, keySource,
+                    byoApiKey, platformApiKey, inputPricePer1m, hitPricePer1m,
+                    missPricePer1m, outputPricePer1m, timeoutMs, maxTokens,
+                    budgetCny, "grass", false);
+        }
 
         public boolean useByo() {
             return "BYO".equalsIgnoreCase(keySource) && StringUtils.hasText(byoApiKey);
@@ -353,6 +393,8 @@ public class SettingsService {
             map.put("timeoutMs", timeoutMs);
             map.put("maxTokens", maxTokens);
             map.put("budgetCny", budgetCny.toPlainString());
+            map.put("theme", theme);
+            map.put("followSystemTheme", followSystemTheme);
             return map;
         }
     }

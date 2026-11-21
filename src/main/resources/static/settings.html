@@ -4,6 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>设置 · 实习投递助手</title>
+  <script src="/theme.js"></script>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f5f7fa; color: #222; }
@@ -12,6 +13,7 @@
     header a { color: #d8f0ea; font-size: 13px; text-decoration: none; border: 1px solid #4e8f85; padding: 5px 10px; border-radius: 6px; }
     header a:hover { background: #2b8073; }
     header .save { margin-left: auto; }
+    header .version { font-size: 12px; opacity: .92; }
     main { padding: 18px 24px 60px; max-width: 1000px; margin: 0 auto; display: grid; grid-template-columns: 1fr 320px; gap: 20px; }
     @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
     .card { background: #fff; border-radius: 8px; padding: 18px 20px; margin-bottom: 16px; }
@@ -25,6 +27,18 @@
     button.primary { background: #1f6f63; color: #fff; border-color: #1f6f63; }
     button:disabled { opacity: .5; cursor: not-allowed; }
     .hint { font-size: 12px; color: #889; margin-top: 3px; }
+    .theme-options { display: flex; gap: 10px; flex-wrap: wrap; }
+    .theme-option { display: inline-flex !important; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line, #cfd6dd); border-radius: 6px; background: var(--surface, #fff); cursor: pointer; font-size: 13px; }
+    .theme-option input { width: auto; }
+    .theme-option:has(input:checked) { border-color: var(--primary, #1f6f63); color: var(--primary, #1f6f63); }
+    .theme-option:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+    .swatch { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); display: inline-block; }
+    .swatch.grass { background: #1f6f63; }
+    .swatch.blue { background: #2563a8; }
+    .swatch.dark { background: #12151a; }
+    .swatch.coffee { background: #6f4e37; }
+    .check-line { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text, #222); cursor: pointer; }
+    .check-line input { width: auto; }
     .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #e8f3f0; color: #1f6f63; }
     .bar { height: 10px; background: #eef1f4; border-radius: 6px; overflow: hidden; margin: 8px 0 4px; }
     .bar > i { display: block; height: 100%; background: #1f6f63; }
@@ -46,17 +60,37 @@
     .modal .note { font-size: 12px; color: #889; margin-top: 12px; }
     .modal button { margin-top: 18px; }
   </style>
+  <link rel="stylesheet" href="/theme.css"/>
 </head>
 <body>
 <header>
   <h1>设置</h1>
   <a href="/">← 岗位列表</a>
   <a href="/profile.html">个人资料</a>
+  <span class="version" id="appVersion">当前版本 v0.12.2</span>
   <button class="primary save" onclick="save()" id="btnSave">保存设置</button>
 </header>
 
 <main>
   <div>
+    <div class="card">
+      <h2>外观</h2>
+      <div class="row"><label>主题颜色</label>
+        <div class="theme-options" id="themeOptions">
+          <label class="theme-option"><input type="radio" name="theme" value="grass" checked onchange="onThemeChange()"/><span class="swatch grass"></span>草绿（默认）</label>
+          <label class="theme-option"><input type="radio" name="theme" value="blue" onchange="onThemeChange()"/><span class="swatch blue"></span>浅蓝</label>
+          <label class="theme-option"><input type="radio" name="theme" value="dark" onchange="onThemeChange()"/><span class="swatch dark"></span>深黑</label>
+          <label class="theme-option"><input type="radio" name="theme" value="coffee" onchange="onThemeChange()"/><span class="swatch coffee"></span>咖色</label>
+        </div>
+      </div>
+      <div class="row"><label>系统主题</label>
+        <div>
+          <label class="check-line"><input type="checkbox" id="followSystemTheme" onchange="onFollowThemeChange()"/> 根据系统主题改变网站主题</label>
+          <div class="hint" id="followThemeHint">开启后：系统深色（夜间模式等）自动用「深黑」，系统浅色自动用「草绿」；手动主题选择暂不生效。</div>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h2>生成引擎</h2>
       <div class="row"><label>生成模式</label>
@@ -138,7 +172,9 @@
       <div class="kv"><span>已用</span><b id="usedCny">—</b></div>
       <div class="kv"><span>剩余</span><b id="remainingCny">—</b></div>
       <div class="kv"><span>总额度</span><b id="budgetCny">—</b></div>
-      <div class="hint" style="margin-top:8px">总额度由平台规则决定，此处只读。自带 Key 不扣平台额度。</div>
+      <div class="kv"><span>自带 Key 已用（估算）</span><b id="byoUsedCny">—</b></div>
+      <div class="kv"><span>自带 Key 调用</span><b id="byoCalls">—</b></div>
+      <div class="hint" style="margin-top:8px">总额度由平台规则决定，此处只读。自带 Key 不扣平台额度；上方金额按当前单价与已记录 token 估算。</div>
     </div>
 
     <div class="card">
@@ -167,7 +203,33 @@
 
 <script>
   const PRICE_FIELDS = ['priceInputPer1m','priceInputCacheHitPer1m','priceInputCacheMissPer1m','priceOutputPer1m'];
+  const APP_VERSION = '0.12.2';
   function $(id) { return document.getElementById(id); }
+  $('appVersion').textContent = '当前版本 v' + APP_VERSION;
+
+  function currentThemeChoice() {
+    const checked = document.querySelector('input[name="theme"]:checked');
+    return checked ? checked.value : 'grass';
+  }
+
+  function updateThemeControls() {
+    const follow = $('followSystemTheme').checked;
+    document.querySelectorAll('input[name="theme"]').forEach(radio => { radio.disabled = follow; });
+    $('followThemeHint').textContent = follow
+      ? '已开启：系统深色（夜间模式等）自动用「深黑」，系统浅色自动用「草绿」。当前生效主题：' + window.InternHelperTheme.effectiveTheme() + '。'
+      : '开启后：系统深色（夜间模式等）自动用「深黑」，系统浅色自动用「草绿」；手动主题选择暂不生效。';
+  }
+
+  function onThemeChange() {
+    if ($('followSystemTheme').checked) return;
+    window.InternHelperTheme.setTheme(currentThemeChoice());
+    updateThemeControls();
+  }
+
+  function onFollowThemeChange() {
+    window.InternHelperTheme.setFollow($('followSystemTheme').checked);
+    updateThemeControls();
+  }
 
   function toast(msg) {
     const t = $('toast');
@@ -196,6 +258,11 @@
     $('keyHint').textContent = s.keyConfigured
       ? '当前 Key：' + (s.apiKeyMasked || '已配置（脱敏）') + '（留空不覆盖）'
       : '尚未配置 Key';
+    const theme = ['grass','blue','dark','coffee'].includes(s.theme) ? s.theme : 'grass';
+    const radio = document.querySelector('input[name="theme"][value="' + theme + '"]');
+    if (radio) radio.checked = true;
+    $('followSystemTheme').checked = String(s.followSystemTheme) === 'true';
+    updateThemeControls();
   }
 
   function fillQuota(q) {
@@ -203,6 +270,8 @@
     $('usedCny').textContent = (q.usedCny || '0') + ' 元';
     $('remainingCny').textContent = (q.remainingCny || '0') + ' 元';
     $('budgetCny').textContent = (q.budgetCny || '0') + ' 元';
+    $('byoUsedCny').textContent = (q.byoUsedCny || '0') + ' 元';
+    $('byoCalls').textContent = (q.byoCalls || 0) + ' 次';
     $('quotaBar').style.width = Math.min(100, Math.max(0, Number(q.percentUsed) || 0)) + '%';
   }
 
@@ -229,7 +298,7 @@
     try {
       const list = await api('/api/settings/usage');
       if (!list.length) { $('usageBox').textContent = '暂无调用记录'; return; }
-      $('usageBox').innerHTML = '<table><thead><tr><th>时间</th><th>模式</th><th>金额</th></tr></thead><tbody>'
+      $('usageBox').innerHTML = '<table><thead><tr><th>时间</th><th>模式</th><th>估算金额</th></tr></thead><tbody>'
         + list.map(u => '<tr><td>' + esc(String(u.createdAt || '').replace('T',' ').slice(0,16))
           + '</td><td>' + esc(u.mode) + '</td><td>' + esc(u.costCny) + '</td></tr>').join('')
         + '</tbody></table>';
@@ -245,7 +314,9 @@
       baseUrl: $('baseUrl').value.trim(),
       model: $('model').value.trim(),
       timeoutMs: $('timeoutMs').value,
-      maxTokens: $('maxTokens').value
+      maxTokens: $('maxTokens').value,
+      theme: currentThemeChoice(),
+      followSystemTheme: $('followSystemTheme').checked
     };
     PRICE_FIELDS.forEach(f => { patch[f] = $(f).value.trim() || '0'; });
     const key = $('apiKey').value.trim();
@@ -270,6 +341,8 @@
       });
       fillSettings(d.settings);
       fillQuota(d.quota);
+      window.InternHelperTheme.setTheme(d.settings.theme || 'grass');
+      window.InternHelperTheme.setFollow(String(d.settings.followSystemTheme) === 'true');
       $('apiKey').value = '';
       toast('已保存，立即生效');
     } catch (e) { toast('保存失败：' + e.message); }

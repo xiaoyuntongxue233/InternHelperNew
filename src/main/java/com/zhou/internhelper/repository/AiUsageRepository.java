@@ -14,5 +14,7 @@ public interface AiUsageRepository extends JpaRepository<AiUsage, Long> {
             "where u.userKey = :userKey and u.mode = 'PLATFORM'")
     BigDecimal sumPlatformCost(@Param("userKey") String userKey);
 
+    List<AiUsage> findByUserKeyAndMode(String userKey, String mode);
+
     List<AiUsage> findTop20ByOrderByCreatedAtDesc();
 }

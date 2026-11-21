@@ -110,14 +110,24 @@ public class SettingsController {
     }
 
     @GetMapping("/usage")
-    public List<AiUsage> usage() {
-        return usageRepository.findTop20ByOrderByCreatedAtDesc();
+    public List<Map<String, Object>> usage() {
+        List<Map<String, Object>> result = new java.util.ArrayList<>();
+        for (AiUsage row : usageRepository.findTop20ByOrderByCreatedAtDesc()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("createdAt", row.getCreatedAt());
+            item.put("mode", row.getMode());
+            // BYO 记录的 costCny 恒为 0，统一按当前单价从 token 估算，避免列表与汇总不一致
+            item.put("costCny", quota.estimatedCostCny(row).toPlainString());
+            result.add(item);
+        }
+        return result;
     }
 
     private Map<String, Object> quotaInfo() {
         BigDecimal used = quota.usedCny();
         BigDecimal budget = settings.snapshot().budgetCny();
         BigDecimal remaining = quota.remainingCny();
+        Map<String, Object> byo = quota.byoUsage();
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("usedCny", used.toPlainString());
         map.put("budgetCny", budget.toPlainString());
@@ -125,6 +135,8 @@ public class SettingsController {
         map.put("mode", settings.snapshot().useByo() ? "BYO" : "PLATFORM");
         map.put("percentUsed", budget.signum() == 0 ? 0
                 : used.multiply(BigDecimal.valueOf(100)).divide(budget, 0, RoundingMode.HALF_UP).intValue());
+        map.put("byoUsedCny", byo.get("usedCny"));
+        map.put("byoCalls", byo.get("calls"));
         return map;
     }
 

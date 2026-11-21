@@ -1,0 +1,343 @@
+/* 主题配色：草绿（默认）/ 浅蓝 / 深黑 / 咖色。
+ * theme.js 在 <head> 设置 html[data-theme]，本文件覆盖各页面既有静态配色。 */
+
+:root,
+html[data-theme="grass"] {
+  color-scheme: light;
+  --bg: #f5f7fa;
+  --surface: #ffffff;
+  --text: #222222;
+  --muted: #667788;
+  --line: #dfe6eb;
+  --line-soft: #eef1f4;
+  --primary: #1f6f63;
+  --primary-dark: #1a5f55;
+  --primary-hover: #2b8073;
+  --on-primary: #ffffff;
+  --header-link: #d8f0ea;
+  --header-link-border: #4e8f85;
+  --soft: #eef7f4;
+  --soft-hover: #e4f1ed;
+  --accent-soft: #f6fbf9;
+  --accent-border: #a9cfc6;
+  --row-hover: #fafcfd;
+  --danger: #c0392b;
+  --warning-bg: #fff8e6;
+  --warning-text: #8a6d3b;
+  --warning-border: #f0e0b0;
+  --shadow: rgba(0, 0, 0, .12);
+}
+
+html[data-theme="blue"] {
+  color-scheme: light;
+  --bg: #f1f6fb;
+  --surface: #ffffff;
+  --text: #1f2937;
+  --muted: #64748b;
+  --line: #d9e5f1;
+  --line-soft: #eaf0f7;
+  --primary: #2563a8;
+  --primary-dark: #1d4f86;
+  --primary-hover: #3479c2;
+  --on-primary: #ffffff;
+  --header-link: #d9e9fb;
+  --header-link-border: #7ba9d4;
+  --soft: #eaf3fc;
+  --soft-hover: #dcebf9;
+  --accent-soft: #f3f8ff;
+  --accent-border: #bcd7ef;
+  --row-hover: #f7faff;
+  --danger: #c0392b;
+  --warning-bg: #fff8e6;
+  --warning-text: #8a6d3b;
+  --warning-border: #f0e0b0;
+  --shadow: rgba(24, 64, 110, .14);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #12151a;
+  --surface: #1c2026;
+  --text: #e6e9ee;
+  --muted: #9aa6b2;
+  --line: #333b45;
+  --line-soft: #2a3139;
+  --primary: #3aa58f;
+  --primary-dark: #2c8776;
+  --primary-hover: #47b8a0;
+  --on-primary: #07120f;
+  --header-link: #bfe6de;
+  --header-link-border: #3f7a70;
+  --soft: #232c33;
+  --soft-hover: #2a353d;
+  --accent-soft: #1d2a2a;
+  --accent-border: #35534c;
+  --row-hover: #222831;
+  --danger: #ef6b5e;
+  --warning-bg: #3a2f1d;
+  --warning-text: #f0c987;
+  --warning-border: #6b5430;
+  --shadow: rgba(0, 0, 0, .5);
+}
+
+html[data-theme="coffee"] {
+  color-scheme: light;
+  --bg: #f6f1ea;
+  --surface: #fffaf4;
+  --text: #3b2f27;
+  --muted: #8a7a6d;
+  --line: #e4d6c6;
+  --line-soft: #efe4d7;
+  --primary: #6f4e37;
+  --primary-dark: #5a3d2b;
+  --primary-hover: #856349;
+  --on-primary: #fff8ef;
+  --header-link: #f0dfcd;
+  --header-link-border: #b89576;
+  --soft: #f7ecdf;
+  --soft-hover: #f2e1cd;
+  --accent-soft: #fbf4ea;
+  --accent-border: #d9bc9d;
+  --row-hover: #fbf6ef;
+  --danger: #b3483b;
+  --warning-bg: #fff5df;
+  --warning-text: #8a5a00;
+  --warning-border: #e8c98f;
+  --shadow: rgba(80, 52, 30, .16);
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  background: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+a {
+  color: var(--primary);
+}
+
+header {
+  background: var(--primary) !important;
+  color: var(--on-primary) !important;
+}
+
+header h1 {
+  color: var(--on-primary) !important;
+}
+
+header a {
+  color: var(--header-link) !important;
+  border-color: var(--header-link-border) !important;
+}
+
+header a:hover {
+  background: var(--primary-hover) !important;
+  color: var(--on-primary) !important;
+}
+
+input,
+select,
+textarea,
+.greet-edit {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border-color: var(--line) !important;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--primary);
+}
+
+button {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border-color: var(--line) !important;
+}
+
+button.primary,
+button.btn-primary,
+.salary-box .seg button.on {
+  background: var(--primary) !important;
+  color: var(--on-primary) !important;
+  border-color: var(--primary) !important;
+}
+
+button.danger,
+.confirm-box .danger,
+.rec button {
+  background: var(--danger) !important;
+  color: #ffffff !important;
+  border-color: var(--danger) !important;
+}
+
+.card,
+.drawer,
+.confirm-box,
+.modal {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  box-shadow: 0 2px 12px var(--shadow) !important;
+}
+
+.card h2,
+.drawer-head h3,
+.confirm-box h3,
+.extract-box summary,
+.batch-bar b,
+th .arrow {
+  color: var(--primary) !important;
+}
+
+.modal h3 {
+  color: var(--warning-text) !important;
+}
+
+label,
+.row label,
+.field label,
+.shortcut-panel b {
+  color: var(--muted) !important;
+}
+
+.hint,
+.muted,
+.drawer-note,
+.rec .meta,
+.hist-item .hmeta,
+.kbd-hint,
+.pager .info,
+.len,
+.modal .note {
+  color: var(--muted) !important;
+}
+
+table {
+  background: var(--surface) !important;
+}
+
+th,
+td,
+.rec,
+.hist-item,
+.advanced,
+.kv,
+.brief {
+  border-color: var(--line-soft) !important;
+}
+
+th {
+  background: var(--soft) !important;
+  color: var(--text) !important;
+}
+
+th.sortable:hover {
+  background: var(--soft-hover) !important;
+}
+
+tr:hover td {
+  background: var(--row-hover) !important;
+}
+
+tr.focused td {
+  background: var(--soft) !important;
+  box-shadow: inset 3px 0 0 var(--primary) !important;
+}
+
+.greet,
+.preview,
+.extract-box,
+.batch-bar,
+.shortcut-panel,
+.hist-list {
+  background: var(--accent-soft) !important;
+  border-color: var(--accent-border) !important;
+  color: var(--text) !important;
+}
+
+.shortcut-panel {
+  color: var(--muted) !important;
+}
+
+.shortcut-panel kbd {
+  background: var(--surface) !important;
+  color: var(--primary) !important;
+  border-color: var(--line) !important;
+}
+
+.tag {
+  background: var(--soft) !important;
+  color: var(--primary) !important;
+}
+
+.bar {
+  background: var(--line) !important;
+}
+
+.bar > i {
+  background: var(--primary) !important;
+}
+
+.toast {
+  background: var(--primary) !important;
+  color: var(--on-primary) !important;
+}
+
+.toast.err {
+  background: var(--danger) !important;
+}
+
+.msg.ok,
+.msg-ok {
+  color: var(--primary) !important;
+}
+
+.msg.err,
+.msg-err {
+  color: var(--danger) !important;
+}
+
+.msg.warn,
+.clause-alert {
+  background: var(--warning-bg) !important;
+  color: var(--warning-text) !important;
+  border-color: var(--warning-border) !important;
+}
+
+.drawer-mask,
+.confirm-mask,
+.modal-mask {
+  background: var(--shadow) !important;
+}
+
+.col-resizer:hover {
+  background: var(--primary) !important;
+  opacity: .3;
+}
+
+/* 覆盖页面里少量内联颜色，避免浅蓝/深黑/咖色下出现旧草绿色孤岛 */
+[style*="color:#889"],
+[style*="color: #889"],
+[style*="color:#556"],
+[style*="color: #556"],
+[style*="color:#445"],
+[style*="color: #445"] {
+  color: var(--muted) !important;
+}
+
+[style*="color:#334"],
+[style*="color: #334"] {
+  color: var(--text) !important;
+}
+
+[style*="background:#fff"],
+[style*="background: #fff"] {
+  background: var(--surface) !important;
+}
+
+html[data-theme="dark"] ::placeholder {
+  color: #8c96a2;
+}
