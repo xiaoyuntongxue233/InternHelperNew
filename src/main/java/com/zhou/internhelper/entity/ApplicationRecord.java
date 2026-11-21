@@ -25,8 +25,8 @@ public class ApplicationRecord {
     @Column(length = 255)
     private String title;
 
-    /** 实际发出的打招呼内容 */
-    @Column(length = 1000)
+    /** 实际发出的打招呼内容（与话术保存接口的 2000 字上限保持一致） */
+    @Column(length = 2000)
     private String message;
 
     /** 是否发送成功 */

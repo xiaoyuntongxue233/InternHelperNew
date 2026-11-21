@@ -158,15 +158,19 @@ public class JobController {
         }
 
         Map<Long, Object> results = new LinkedHashMap<>();
-        Map<Long, String> errors = new LinkedHashMap<>();
+        Map<String, String> errors = new LinkedHashMap<>();
         for (Long id : ids) {
+            if (id == null) {
+                errors.put("null", "岗位 ID 不能为空");
+                continue;
+            }
             try {
                 Job job = jobService.get(id); // 软删岗位视为不存在
                 GreetingService.Greeting g = greetingService.generate(job);
                 appendVersion(job.getId(), g, "GENERATE");
                 results.put(id, greetingVo(job, g));
             } catch (Exception e) {
-                errors.put(id, e.getMessage() == null ? "生成失败" : e.getMessage());
+                errors.put(String.valueOf(id), e.getMessage() == null ? "生成失败" : e.getMessage());
             }
         }
         Map<String, Object> map = new LinkedHashMap<>();
@@ -176,12 +180,19 @@ public class JobController {
         return map;
     }
 
+    /**
+     * 批量改状态的请求体。
+     * 用 record 显式声明 List<Long>，避免 Map<String,Object> 下 Jackson 把整数推断为 Integer，
+     * 导致遍历 for(Long id : ids) 时 ClassCastException（Integer cannot be cast to Long）。
+     */
+    public record BatchStatusRequest(List<Long> ids, String status) {
+    }
+
     /** 批量改状态：状态走白名单，逐条走 updateStatus（软删岗位视为不存在） */
     @PostMapping("/batch/status")
-    public Map<String, Object> batchStatus(@RequestBody Map<String, Object> body) {
-        @SuppressWarnings("unchecked")
-        List<Long> ids = body == null ? null : (List<Long>) body.get("ids");
-        String status = body == null ? null : (String) body.get("status");
+    public Map<String, Object> batchStatus(@RequestBody(required = false) BatchStatusRequest body) {
+        List<Long> ids = body == null ? null : body.ids();
+        String status = body == null ? null : body.status();
         if (ids == null || ids.isEmpty()) {
             throw new IllegalArgumentException("请提供 ids");
         }
@@ -192,13 +203,18 @@ public class JobController {
             throw new IllegalArgumentException("岗位状态只能是 NEW / CONTACTED / SKIPPED");
         }
         int changed = 0;
-        Map<Long, String> errors = new LinkedHashMap<>();
+        // 键统一用 ID 字符串：null 元素不能用 Long 作 Map key（否则 Jackson 序列化 null key 触发 500）
+        Map<String, String> errors = new LinkedHashMap<>();
         for (Long id : ids) {
+            if (id == null) {
+                errors.put("null", "岗位 ID 不能为空");
+                continue;
+            }
             try {
                 jobService.updateStatus(id, status);
                 changed++;
             } catch (Exception e) {
-                errors.put(id, e.getMessage() == null ? "更新失败" : e.getMessage());
+                errors.put(String.valueOf(id), e.getMessage() == null ? "更新失败" : e.getMessage());
             }
         }
         Map<String, Object> map = new LinkedHashMap<>();
@@ -218,13 +234,17 @@ public class JobController {
             throw new IllegalArgumentException("单次批量最多 " + BATCH_LIMIT_COMMON + " 条");
         }
         int deleted = 0;
-        Map<Long, String> errors = new LinkedHashMap<>();
+        Map<String, String> errors = new LinkedHashMap<>();
         for (Long id : ids) {
+            if (id == null) {
+                errors.put("null", "岗位 ID 不能为空");
+                continue;
+            }
             try {
                 jobService.delete(id);
                 deleted++;
             } catch (Exception e) {
-                errors.put(id, e.getMessage() == null ? "删除失败" : e.getMessage());
+                errors.put(String.valueOf(id), e.getMessage() == null ? "删除失败" : e.getMessage());
             }
         }
         Map<String, Object> map = new LinkedHashMap<>();
@@ -244,17 +264,33 @@ public class JobController {
             throw new IllegalArgumentException("单次批量最多 " + BATCH_LIMIT_COMMON + " 条");
         }
         int marked = 0;
-        Map<Integer, String> errors = new LinkedHashMap<>();
-        for (int i = 0; i < items.size(); i++) {
-            Map<String, String> item = items.get(i);
+        // 键统一用原始 ID 字符串（便于前端定位、避免信息泄露的数组索引）；与 batch/status 一致
+        Map<String, String> errors = new LinkedHashMap<>();
+        for (Map<String, String> item : items) {
+            String rawId = item == null ? null : item.get("id");
             try {
-                Long id = Long.valueOf(item.get("id"));
+                if (rawId == null || rawId.isBlank()) {
+                    errors.put(String.valueOf(rawId), "岗位 ID 不能为空");
+                    continue;
+                }
+                Long id;
+                try {
+                    id = Long.valueOf(rawId);
+                } catch (NumberFormatException nfe) {
+                    errors.put(rawId, "岗位 ID 格式错误");
+                    continue;
+                }
                 String message = item.get("message");
+                // 前置长度校验：与话术保存接口及 message 列（2000）一致，避免落库时约束异常整批回滚
+                if (message != null && message.length() > 2000) {
+                    errors.put(rawId, "话术不能超过 2000 字");
+                    continue;
+                }
                 boolean success = item.get("success") == null || Boolean.parseBoolean(item.get("success"));
                 jobService.markContacted(id, message, success, item.get("failReason"));
                 marked++;
             } catch (Exception e) {
-                errors.put(i, e.getMessage() == null ? "记录失败" : e.getMessage());
+                errors.put(String.valueOf(rawId), e.getMessage() == null ? "记录失败" : e.getMessage());
             }
         }
         Map<String, Object> map = new LinkedHashMap<>();
