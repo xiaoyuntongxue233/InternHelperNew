@@ -71,8 +71,8 @@ public class Job {
     @Column(name = "salary_max")
     private Integer salaryMax;
 
-    /** 职位链接 */
-    @Column(length = 512)
+    /** 职位链接（BOSS 带 securityId 的链接可达 600+ 字符，留足余量） */
+    @Column(length = 2048)
     private String url;
 
     /** 技术栈关键词，逗号分隔 */

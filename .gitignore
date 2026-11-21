@@ -23,3 +23,9 @@ backfill.sql
 ui4.png
 ui_edit.png
 collect_salary.mjs
+
+# 本地工作记忆与抓取/解析临时产物
+.workbuddy/
+extracted_draft.json
+extracted_draft.txt
+jd_screenshot.png

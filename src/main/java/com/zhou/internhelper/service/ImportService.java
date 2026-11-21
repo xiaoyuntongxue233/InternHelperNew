@@ -88,6 +88,11 @@ public class ImportService {
                 log.warn("导入岗位 {} / {} 的 url 协议不被接受，已忽略：{}", company, title, url);
                 url = null;
             }
+            // 与 Job.url 列长度一致；超长链接（多为一次性 tracking 参数）不入库，避免整批 409
+            if (url != null && url.length() > 2048) {
+                log.warn("导入岗位 {} / {} 的 url 超过 2048 字符，已忽略：{}", company, title, url);
+                url = null;
+            }
             job.setUrl(url);
             job.setSkills(text(node, "skills"));
             job.setJdText(text(node, "jdText") != null ? text(node, "jdText") : text(node, "jd"));

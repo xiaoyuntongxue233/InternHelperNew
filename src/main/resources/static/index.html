@@ -20,15 +20,21 @@
     button { cursor: pointer; }
     button.primary { background: #1f6f63; color: #fff; border-color: #1f6f63; }
     button:disabled { opacity: .45; cursor: not-allowed; }
-    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; }
-    th, td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid #eef1f4; vertical-align: top; }
-    td:last-child, th:last-child { white-space: nowrap; }
-    th { background: #f0f4f6; font-weight: 600; }
+    /* 固定布局：列宽由表头决定，刷新/回填长文本时不会被内容撑宽 */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; table-layout: fixed; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; }
+    th, td { padding: 8px 10px; text-align: left; font-size: 13px; border-bottom: 1px solid #eef1f4; vertical-align: top; overflow-wrap: anywhere; }
+    th { overflow: hidden; text-overflow: ellipsis; }
+    td:last-child, th:last-child { white-space: normal; }
+    th { background: #f0f4f6; font-weight: 600; position: relative; }
+    .col-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 3; }
+    .col-resizer:hover { background: rgba(31,111,99,.25); }
+    tbody { position: relative; }
     th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
     th.sortable:hover { background: #e6edf0; }
     th .arrow { color: #1f6f63; font-size: 11px; margin-left: 2px; }
     tr:hover td { background: #fafcfd; }
-    .greet { margin-top: 2px; padding: 2px 10px; background: #f6fbf9; border: 1px dashed #a9cfc6; border-radius: 6px; font-size: 13px; line-height: 1.18; white-space: pre-wrap; width: 100%; max-width: none; }
+    .greet { margin-top: 2px; padding: 2px 10px; background: #f6fbf9; border: 1px dashed #a9cfc6; border-radius: 6px; font-size: 13px; line-height: 1.18; white-space: pre-wrap; width: 100%; max-width: 100%; }
     .greet button { padding: 1px 6px; font-size: 11px; }
     .greet .muted { font-size: 11px; }
     .clause-alert { background: #fff4e5; color: #8a5a00; border: 1px solid #f0d8a8; border-radius: 6px; padding: 5px 8px; font-size: 12px; margin: 2px 0; line-height: 1.4; }
@@ -141,6 +147,7 @@
     <input id="q" placeholder="搜索公司 / 岗位" style="width:190px" />
     <button class="primary" onclick="applyFilter()">查询</button>
     <button onclick="resetAll()">重置</button>
+    <button onclick="resetTableLayout()" title="恢复默认列宽与行高">表格布局重置</button>
     <span class="muted" id="total"></span>
     <span class="kbd-hint" id="kbdHint">快捷键：j/k 移动 · g 生成 · c 复制 · s 已投递 · x 勾选 · / 搜索</span>
   </div>
@@ -171,24 +178,26 @@
     <span><kbd>Esc</kbd> 关闭确认框</span>
   </div>
 
+  <div class="table-wrap">
   <table>
     <thead>
     <tr>
       <th class="col-sel"><input type="checkbox" id="selAll" onchange="toggleSelectAll(this.checked)" title="全选本页"/></th>
-      <th style="width:160px">公司</th>
+      <th>公司</th>
       <th>岗位</th>
-      <th style="width:150px">地点</th>
-      <th style="width:92px" class="sortable" onclick="toggleSort('months')">实习(月)<span class="arrow" id="ar-months"></span></th>
-      <th style="width:100px" class="sortable" onclick="toggleSort('days')">出勤(天/周)<span class="arrow" id="ar-days"></span></th>
-      <th style="width:100px" class="sortable" onclick="toggleSort('dailyMin')">最低日薪(元)<span class="arrow" id="ar-dailyMin"></span></th>
-      <th style="width:100px" class="sortable" onclick="toggleSort('dailyMax')">最高日薪(元)<span class="arrow" id="ar-dailyMax"></span></th>
-      <th style="width:110px">薪资原文</th>
-      <th style="width:76px" class="sortable" onclick="toggleSort('status')">状态<span class="arrow" id="ar-status"></span></th>
-      <th style="width:200px">操作</th>
+      <th>地点</th>
+      <th class="sortable" onclick="toggleSort('months')">实习(月)<span class="arrow" id="ar-months"></span></th>
+      <th class="sortable" onclick="toggleSort('days')">出勤(天/周)<span class="arrow" id="ar-days"></span></th>
+      <th class="sortable" onclick="toggleSort('dailyMin')">最低日薪(元)<span class="arrow" id="ar-dailyMin"></span></th>
+      <th class="sortable" onclick="toggleSort('dailyMax')">最高日薪(元)<span class="arrow" id="ar-dailyMax"></span></th>
+      <th>薪资原文</th>
+      <th class="sortable" onclick="toggleSort('status')">状态<span class="arrow" id="ar-status"></span></th>
+      <th>操作</th>
     </tr>
     </thead>
     <tbody id="rows"></tbody>
   </table>
+  </div>
 
   <div class="pager">
     <button id="btnPrev" onclick="prevPage()">上一页</button>
@@ -387,6 +396,7 @@
     });
     // 翻页/筛选后 DOM 重建，复选框选择随行销毁；同步批量栏计数与实际选中，避免提示误导
     syncSelection();
+    applyRowHeights();
     refreshStats();
   }
 
@@ -908,6 +918,136 @@
       await refreshStats();
     } catch (e) { toast('删除失败：' + e.message, 'err'); }
   }
+  // ===== 表格尺寸可调：表头拖列宽、行底边拖行高，布局写入 localStorage =====
+  const DEFAULT_COL_WIDTHS = [3, 11, 20, 10, 6, 6, 6, 6, 7, 6, 19];
+  const COL_KEY = 'internHelper.table.colWidths';
+  const ROW_KEY = 'internHelper.table.rowHeights';
+  let rowDrag = null;
+
+  function tableCols() {
+    let cg = document.getElementById('tableCols');
+    if (!cg) {
+      cg = document.createElement('colgroup');
+      cg.id = 'tableCols';
+      const table = document.querySelector('table');
+      table.insertBefore(cg, table.firstChild);
+    }
+    while (cg.children.length < DEFAULT_COL_WIDTHS.length) cg.appendChild(document.createElement('col'));
+    return Array.from(cg.children);
+  }
+
+  function loadColWidths() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COL_KEY) || 'null');
+      return Array.isArray(saved) && saved.length === DEFAULT_COL_WIDTHS.length
+        && saved.every(n => Number(n) > 0) ? saved : DEFAULT_COL_WIDTHS;
+    } catch (e) { return DEFAULT_COL_WIDTHS; }
+  }
+
+  function applyColWidths(widths) {
+    tableCols().forEach((col, i) => { col.style.width = widths[i] + '%'; });
+  }
+
+  function saveColWidths() {
+    const ths = Array.from(document.querySelectorAll('thead th'));
+    const total = ths.reduce((sum, th) => sum + th.getBoundingClientRect().width, 0);
+    if (!total) return;
+    const pcts = ths.map(th => Number((th.getBoundingClientRect().width / total * 100).toFixed(2)));
+    localStorage.setItem(COL_KEY, JSON.stringify(pcts));
+  }
+
+  function startColDrag(e, idx) {
+    e.preventDefault();
+    e.stopPropagation();
+    const ths = Array.from(document.querySelectorAll('thead th'));
+    const widths = ths.map(th => th.getBoundingClientRect().width);
+    const neighbor = idx === widths.length - 2 ? idx - 1 : idx + 1;
+    const pairSum = widths[idx] + widths[neighbor];
+    const startX = e.clientX;
+    const move = ev => {
+      let w = widths[idx] + (ev.clientX - startX);
+      w = Math.max(36, Math.min(pairSum - 36, w));
+      const cols = tableCols();
+      cols[idx].style.width = w + 'px';
+      cols[neighbor].style.width = (pairSum - w) + 'px';
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      saveColWidths();
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  }
+
+  function setupColResizers() {
+    applyColWidths(loadColWidths());
+    Array.from(document.querySelectorAll('thead th')).forEach((th, i, ths) => {
+      if (i === ths.length - 1 || th.querySelector('.col-resizer')) return;
+      const handle = document.createElement('div');
+      handle.className = 'col-resizer';
+      handle.title = '拖动调整列宽';
+      handle.addEventListener('mousedown', e => startColDrag(e, i));
+      th.appendChild(handle);
+    });
+  }
+
+  function loadRowHeights() {
+    try { return JSON.parse(localStorage.getItem(ROW_KEY) || '{}') || {}; } catch (e) { return {}; }
+  }
+
+  function applyRowHeights() {
+    const map = loadRowHeights();
+    document.querySelectorAll('tr[data-job-id]').forEach(tr => {
+      const h = map[tr.dataset.jobId];
+      tr.style.height = h ? Number(h) + 'px' : '';
+    });
+  }
+
+  function saveRowHeight(id, height) {
+    const map = loadRowHeights();
+    if (height < 40) delete map[id]; else map[id] = Math.round(height);
+    localStorage.setItem(ROW_KEY, JSON.stringify(map));
+  }
+
+  document.addEventListener('mousemove', e => {
+    if (rowDrag) {
+      e.preventDefault();
+      rowDrag.tr.style.height = Math.max(36, rowDrag.h + e.clientY - rowDrag.startY) + 'px';
+      return;
+    }
+    const tr = e.target && e.target.closest ? e.target.closest('tr[data-job-id]') : null;
+    const tbody = document.getElementById('rows');
+    if (!tr || !tbody) return;
+    const rect = tr.getBoundingClientRect();
+    tbody.style.cursor = (e.clientY >= rect.bottom - 5 && e.clientY <= rect.bottom + 2) ? 'row-resize' : '';
+  });
+
+  document.addEventListener('mousedown', e => {
+    const tr = e.target && e.target.closest ? e.target.closest('tr[data-job-id]') : null;
+    if (!tr) return;
+    const rect = tr.getBoundingClientRect();
+    if (e.clientY < rect.bottom - 5 || e.clientY > rect.bottom + 2) return;
+    e.preventDefault();
+    rowDrag = { tr: tr, id: tr.dataset.jobId, startY: e.clientY, h: rect.height };
+    const up = () => {
+      if (rowDrag) saveRowHeight(rowDrag.id, rowDrag.tr.getBoundingClientRect().height);
+      rowDrag = null;
+      document.removeEventListener('mouseup', up);
+      const tbody = document.getElementById('rows');
+      if (tbody) tbody.style.cursor = '';
+    };
+    document.addEventListener('mouseup', up);
+  });
+
+  function resetTableLayout() {
+    localStorage.removeItem(COL_KEY);
+    localStorage.removeItem(ROW_KEY);
+    location.reload();
+  }
+
+  setupColResizers();
+
   document.addEventListener('DOMContentLoaded', function () {
     const mask = document.getElementById('recordsMask');
     mask.addEventListener('click', function (e) { if (e.target === mask) closeRecords(); });

@@ -16,8 +16,13 @@
     .field { margin-bottom: 16px; }
     label { display: block; font-size: 13px; color: #556; margin-bottom: 6px; }
     label .req { color: #d9534f; }
-    input, select { width: 100%; font-size: 14px; padding: 9px 11px; border: 1px solid #cfd6dd; border-radius: 6px; }
-    input:focus, select:focus { outline: none; border-color: #1f6f63; }
+    input, select, textarea { width: 100%; font-size: 14px; padding: 9px 11px; border: 1px solid #cfd6dd; border-radius: 6px; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #1f6f63; }
+    textarea { resize: vertical; line-height: 1.6; }
+    .extract-box { border: 1px solid #d7e5e1; border-radius: 8px; background: #f7fbfa; margin-bottom: 20px; padding: 0 14px; }
+    .extract-box summary { cursor: pointer; padding: 13px 0; font-size: 14px; color: #1f6f63; font-weight: 600; }
+    .extract-box .body { padding-bottom: 14px; }
+    .extract-box textarea { min-height: 110px; background: #fff; }
     .row { display: flex; gap: 12px; }
     .row > .field { flex: 1; }
     .hint { font-size: 12px; color: #889; margin-top: 5px; }
@@ -34,6 +39,7 @@
     .msg { margin-top: 16px; padding: 12px 14px; border-radius: 8px; font-size: 13px; display: none; white-space: pre-wrap; line-height: 1.7; }
     .msg.ok { display: block; background: #e8f6f0; color: #1f6f63; border: 1px solid #b7dfd1; }
     .msg.err { display: block; background: #fdeeee; color: #b33; border: 1px solid #f0c4c4; }
+    .msg.warn { display: block; background: #fff8e6; color: #8a6d3b; border: 1px solid #f0e0b0; }
   </style>
 </head>
 <body>
@@ -46,6 +52,27 @@
 <main>
   <div class="card">
     <h2 id="cardTitle">手动录入一个岗位</h2>
+
+    <details class="extract-box" id="extractBox">
+      <summary>自动填充（AI）：页面文本 / 岗位网址</summary>
+      <div class="body">
+        <div class="hint" style="margin:0 0 8px">方式一：把岗位页面的正文或 HTML 粘贴进来。内容将发送给 AI 模型处理；只生成草稿，需你核对后手动保存。自动填充是独立抽取能力，与「话术生成引擎」（RULE/AI）设置无关，调用会消耗模型用量（BYO 用你自己的 Key）。</div>
+        <textarea id="pageText" placeholder="粘贴岗位详情页的正文或 HTML（只贴网址无效）；不会根据网址抓取网页"></textarea>
+        <div class="actions" style="margin-top:10px">
+          <button type="button" class="primary" id="extractBtn">AI 识别并填充</button>
+          <span class="hint" style="margin:0;align-self:center">找不到原文的字段会留空，不会替你猜测。</span>
+        </div>
+
+        <hr style="border:0;border-top:1px dashed #cfd6dd;margin:16px 0">
+        <div class="hint" style="margin:0 0 8px">方式二：只贴岗位网址，由本机已登录的 Edge 打开页面取正文。遇到安全验证时请在 Edge 窗口手动完成，网页会继续等待。</div>
+        <div class="row">
+          <input id="jobUrl" type="url" placeholder="https://www.zhipin.com/job_detail/..." />
+          <button type="button" class="primary" id="extractByUrlBtn" style="width:auto;white-space:nowrap">按网址识别</button>
+        </div>
+        <div class="hint" style="margin-top:6px">会启动本机 Edge 脚本；同时最多 2 个任务。结果只回填草稿，不自动保存。</div>
+      </div>
+    </details>
+
     <form id="form">
       <div class="field">
         <label>公司名 <span class="req">*</span></label>
@@ -96,7 +123,13 @@
 
       <div class="field">
         <label>岗位要求 / 备注</label>
-        <input id="jdText" placeholder="选填，例如：5天/周、6个月、熟悉 SpringBoot" />
+        <textarea id="jdText" rows="3" placeholder="选填，例如：5天/周、6个月、熟悉 SpringBoot"></textarea>
+      </div>
+
+      <div class="field">
+        <label>技能标签</label>
+        <input id="skills" placeholder="选填，逗号分隔，例如：Java, Spring Boot, MySQL" />
+        <div class="hint">只用于岗位库检索；不会自动写入话术。AI 只填页面中真实出现的技能。</div>
       </div>
 
       <div class="actions">
@@ -140,6 +173,7 @@
     document.getElementById('location').value = job.rawLocation || [job.province, job.city, job.district].filter(Boolean).join('') || '';
     document.getElementById('url').value = job.url || '';
     document.getElementById('jdText').value = job.jdText || '';
+    document.getElementById('skills').value = job.skills || '';
     document.getElementById('months').value = job.months || '';
     document.getElementById('days').value = job.days || '';
 
@@ -180,6 +214,7 @@
       rawLocation: document.getElementById('location').value.trim(),
       url: document.getElementById('url').value.trim(),
       jdText: document.getElementById('jdText').value.trim(),
+      skills: document.getElementById('skills').value.trim(),
       months: document.getElementById('months').value ? parseInt(document.getElementById('months').value, 10) : null,
       days: document.getElementById('days').value ? parseInt(document.getElementById('days').value, 10) : null,
       salaryType: minRaw ? salaryType : null,
@@ -215,6 +250,220 @@
     }
   });
 
+  // 轻量清洗：与后端保持一致（去 script/style、去标签、压缩空白、截断）
+  function cleanPageText(raw) {
+    return String(raw || '')
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<\/(p|div|li|tr|h[1-6]|br)\s*>/gi, ' ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 6000);
+  }
+
+  // 可回填字段与显示名；若目标字段已有不同内容，必须先让用户确认再覆盖
+  const FILL_TARGETS = [
+    ['company', 'company', '公司名'],
+    ['title', 'title', '岗位'],
+    ['location', 'rawLocation', '地点'],
+    ['jdText', 'jdText', '岗位要求'],
+    ['skills', 'skills', '技能标签'],
+    ['salaryMin', 'salaryMin', '薪资最低'],
+    ['salaryMax', 'salaryMax', '薪资最高'],
+    ['months', 'months', '实习月数'],
+    ['days', 'days', '每周出勤']
+  ];
+  let pendingDraft = null;
+
+  function elementValue(id) {
+    return String(document.getElementById(id).value || '').trim();
+  }
+
+  function draftValue(d, key) {
+    const v = d[key];
+    return v === null || v === undefined ? '' : String(v).trim();
+  }
+
+  function writeDraft(d) {
+    let count = 0;
+    for (const [id, key] of FILL_TARGETS) {
+      if (['salaryMin', 'salaryMax', 'months', 'days'].includes(key)) continue;
+      const value = draftValue(d, key);
+      if (value) { document.getElementById(id).value = value; count++; }
+    }
+    if (d.salaryMin !== null && d.salaryMin !== undefined) {
+      setSalaryType(d.salaryType === 'MONTHLY' ? 'MONTHLY' : 'DAILY');
+      document.getElementById('salaryMin').value = d.salaryMin;
+      if (d.salaryMax !== null && d.salaryMax !== undefined) document.getElementById('salaryMax').value = d.salaryMax;
+      count++;
+    }
+    if (d.months !== null && d.months !== undefined) { document.getElementById('months').value = d.months; count++; }
+    if (d.days !== null && d.days !== undefined) { document.getElementById('days').value = d.days; count++; }
+
+    const warnings = d.warnings || [];
+    const prefix = count
+      ? `已填入 ${count} 个字段，请核对后保存。`
+      : '未识别到可安全填入的字段，请手动填写。';
+    if (warnings.length) {
+      msg.className = 'msg warn';
+      msg.innerHTML = esc(prefix) + '<br>' + warnings.map(w => esc(w)).join('<br>');
+    } else {
+      msg.className = 'msg ok';
+      msg.textContent = prefix;
+    }
+  }
+
+  function conflictingFields(d) {
+    const conflicts = [];
+    for (const [id, key, label] of FILL_TARGETS) {
+      const next = draftValue(d, key);
+      if (!next) continue;
+      const old = elementValue(id);
+      if (old && old !== next) conflicts.push(label);
+    }
+    if (d.salaryMin !== null && d.salaryMin !== undefined
+        && elementValue('salaryMin') === String(d.salaryMin)) {
+      const wanted = d.salaryType === 'MONTHLY' ? 'MONTHLY' : 'DAILY';
+      if (salaryType !== wanted) conflicts.push('薪资类型');
+    }
+    return [...new Set(conflicts)];
+  }
+
+  function fillDraft(d) {
+    const conflicts = conflictingFields(d);
+    if (!conflicts.length) { writeDraft(d); return; }
+
+    // 编辑模式下表单已回填原值：未经确认不得静默改写
+    pendingDraft = d;
+    msg.className = 'msg warn';
+    msg.innerHTML = '以下字段已有内容，识别结果会覆盖它们：'
+      + esc(conflicts.join('、'))
+      + '<br><button type="button" class="primary" id="confirmOverwrite" style="margin-top:8px">确认覆盖</button>'
+      + '<button type="button" id="cancelOverwrite" style="margin-top:8px;margin-left:8px">取消</button>';
+    document.getElementById('confirmOverwrite').onclick = () => {
+      const target = pendingDraft;
+      pendingDraft = null;
+      if (target) writeDraft(target);
+    };
+    document.getElementById('cancelOverwrite').onclick = () => {
+      pendingDraft = null;
+      msg.className = 'msg';
+      msg.textContent = '已取消覆盖，原字段未改动。';
+    };
+  }
+
+  async function extractFromPageText() {
+    const raw = document.getElementById('pageText').value.trim();
+    // 只粘贴网址时不去打扰模型：既不产生额度消耗，也避免让用户误以为功能失效
+    if (/^https?:\/\/\S+$/i.test(raw)) {
+      document.getElementById('url').value = raw;
+      msg.className = 'msg warn';
+      msg.innerHTML = '检测到你粘贴的是网址，已自动填入「网页链接」。<br>'
+        + '本功能只识别页面正文 / HTML，不会抓取网址内容；'
+        + '请用浏览器打开该链接后复制页面文字，或让抓取脚本提供正文，再点「AI 识别并填充」。';
+      return;
+    }
+    const pageText = cleanPageText(raw);
+    if (!pageText) {
+      msg.className = 'msg err';
+      msg.textContent = '请先粘贴岗位页面文本';
+      return;
+    }
+    const btn = document.getElementById('extractBtn');
+    btn.disabled = true;
+    msg.className = 'msg';
+    msg.textContent = '正在识别…';
+    try {
+      const res = await fetch('/api/jobs/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageText })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || '识别失败');
+      fillDraft(data);
+    } catch (err) {
+      msg.className = 'msg err';
+      msg.textContent = err.message || '识别失败';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // BOSS 链接的 securityId / ka 是一次性 tracking 参数，去掉后既短又不会过期
+  function canonicalJobUrl(raw) {
+    try {
+      const u = new URL(raw);
+      if ((u.hostname === 'www.zhipin.com' || u.hostname === 'zhipin.com')
+          && u.pathname.startsWith('/job_detail/')) {
+        return u.origin + u.pathname;
+      }
+    } catch (e) { /* 非标准 URL 保持原样 */ }
+    return raw;
+  }
+
+  async function extractByUrl() {
+    const url = document.getElementById('jobUrl').value.trim();
+    if (!/^https?:\/\/\S+$/i.test(url)) {
+      msg.className = 'msg err';
+      msg.textContent = '请先粘贴 http/https 开头的岗位链接';
+      return;
+    }
+    // 先把链接补进表单：即使取数失败，用户也不必再手动粘贴这个长链接
+    document.getElementById('url').value = canonicalJobUrl(url);
+    const btn = document.getElementById('extractByUrlBtn');
+    btn.disabled = true;
+    msg.className = 'msg';
+    msg.textContent = '正在打开页面…（若出现安全验证，请在 Edge 窗口手动完成，这里会继续等待）';
+    try {
+      const res = await fetch('/api/jobs/extract/url', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || '提交失败');
+      await pollUrlJob(data.jobId, btn);
+    } catch (err) {
+      btn.disabled = false;
+      msg.className = 'msg err';
+      msg.textContent = err.message || '按网址识别失败';
+    }
+  }
+
+  function pollUrlJob(jobId, btn) {
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + 200000;
+      const tick = async () => {
+        try {
+          const res = await fetch('/api/jobs/extract/url/' + encodeURIComponent(jobId));
+          const d = await res.json();
+          if (!res.ok) throw new Error(d.message || '查询任务失败');
+          if (d.status === 'SUCCESS') {
+            btn.disabled = false;
+            fillDraft(d.draft || {});
+            resolve();
+            return;
+          }
+          if (d.status === 'FAILED') {
+            throw new Error(d.message || '取数失败');
+          }
+          if (Date.now() > deadline) {
+            throw new Error('等待超时，请检查 Edge 窗口是否需要手动验证');
+          }
+          const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+          msg.textContent = '正在取数…（剩余约 ' + left + ' 秒；安全验证请在 Edge 窗口手动完成）';
+          setTimeout(tick, 2000);
+        } catch (e) {
+          btn.disabled = false;
+          reject(e);
+        }
+      };
+      tick();
+    });
+  }
+
   async function removeJob() {
     if (!isEdit) return;
     const name = document.getElementById('company').value + ' / ' + document.getElementById('title').value;
@@ -233,6 +482,8 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
+  document.getElementById('extractBtn').addEventListener('click', extractFromPageText);
+  document.getElementById('extractByUrlBtn').addEventListener('click', extractByUrl);
   setSalaryType('DAILY');
   loadJob();
 </script>

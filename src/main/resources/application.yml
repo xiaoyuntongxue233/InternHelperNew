@@ -35,6 +35,8 @@ app:
   # 岗位投放目录：抓取脚本把 json 丢进来，系统每 5 分钟自动导入并移到 imported/
   import-dir: ${IMPORT_DIR:import-drop}
   import-scan-ms: 300000
+  # 网页端「按网址自动取数」调用的 Node 可执行文件；留空则自动探测
+  node-path: ${NODE_EXE:}
 
 # 话术生成：默认模板生成；配置 GREETING_ENGINE=AI 或 HYBRID 后启用模型润色
 greeting:

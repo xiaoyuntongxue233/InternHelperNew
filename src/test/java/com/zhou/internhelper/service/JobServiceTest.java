@@ -348,4 +348,47 @@ class JobServiceTest {
         assertFalse(store.get(5L).isDeleted(), "活跃行应作为唯一存活者保持活跃");
         assertNotNull(store.get(5L).getTitleHash(), "活跃行应被回填哈希");
     }
+
+    private static final String BOSS_LONG_URL =
+            "https://www.zhipin.com/job_detail/90fb1549eb50e16e0nx63ti5FFJQ.html"
+                    + "?securityId=TEST_ONLY_NOT_A_REAL_TOKEN_" + "x".repeat(120)
+                    + "&ka=company_more_job_90fb1549eb50e16e0nx63ti5FFJQ"
+                    + "&extra=" + "x".repeat(520);
+    private static final String BOSS_SHORT_URL =
+            "https://www.zhipin.com/job_detail/90fb1549eb50e16e0nx63ti5FFJQ.html";
+
+    @Test
+    void 新增时BOSS长链接去掉一次性参数() {
+        assertTrue(BOSS_LONG_URL.length() > 512, "测试样本应确实超过原列长");
+        Job job = newJob("测试公司", "测试岗位");
+        job.setUrl(BOSS_LONG_URL);
+        Job saved = service.create(job);
+        assertEquals(BOSS_SHORT_URL, saved.getUrl());
+        assertTrue(saved.getUrl().length() < 100);
+    }
+
+    @Test
+    void 编辑补填BOSS长链接也归一化() {
+        Job job = service.create(newJob("测试公司", "测试岗位"));
+        Job patch = new Job();
+        patch.setUrl(BOSS_LONG_URL);
+        Job updated = service.update(job.getId(), patch);
+        assertEquals(BOSS_SHORT_URL, updated.getUrl(), "补填网址不应再触发数据库超长错误");
+    }
+
+    @Test
+    void 超长普通链接报业务错误而不是409() {
+        Job job = newJob("测试公司", "测试岗位");
+        job.setUrl("https://example.com/job/" + "x".repeat(3000));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> service.create(job));
+        assertTrue(e.getMessage().contains("2048"));
+    }
+
+    @Test
+    void 非法协议链接被拒() {
+        Job job = newJob("测试公司", "测试岗位");
+        job.setUrl("javascript:alert(1)");
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> service.create(job));
+        assertTrue(e.getMessage().contains("http/https"));
+    }
 }

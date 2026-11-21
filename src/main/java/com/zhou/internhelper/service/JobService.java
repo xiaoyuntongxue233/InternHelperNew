@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -196,6 +197,8 @@ public class JobService {
     private static final Set<String> STATUSES = Set.of("NEW", "CONTACTED", "SKIPPED");
     private static final Set<String> CATEGORIES = Set.of("INTERN", "FULLTIME");
     private static final Set<String> SALARY_TYPES = Set.of("DAILY", "MONTHLY");
+    /** 与 Job.url 列长度一致；BOSS 带 securityId 的链接约 580 字符 */
+    private static final int MAX_URL_LENGTH = 2048;
 
     /** 校验必填与枚举字段；blankPatch=true 时只校验传入的非 null 字段（用于 update） */
     private void validateJob(Job job, boolean blankPatch) {
@@ -241,6 +244,7 @@ public class JobService {
     @Transactional
     public Job create(Job job) {
         validateJob(job, false);
+        job.setUrl(normalizeUrl(job.getUrl()));
         String hash = titleHash(job.getCompany(), job.getTitle());
         if (jobRepository.findByTitleHashAndDeletedFalse(hash).isPresent()
                 || jobRepository.existsByCompanyAndTitleAndDeletedFalse(job.getCompany(), job.getTitle())) {
@@ -284,7 +288,7 @@ public class JobService {
             job.setRawLocation(patch.getRawLocation());
             normalizeRegion(job);
         }
-        if (patch.getUrl() != null) job.setUrl(patch.getUrl());
+        if (patch.getUrl() != null) job.setUrl(normalizeUrl(patch.getUrl()));
         if (patch.getSkills() != null) job.setSkills(patch.getSkills());
         if (patch.getJdText() != null) job.setJdText(patch.getJdText());
         if (patch.getStatus() != null) job.setStatus(patch.getStatus());
@@ -557,6 +561,37 @@ public class JobService {
             }
         }
         return regionList.size() + metaList.size() + salaryList.size();
+    }
+
+    /**
+     * 网址归一化：BOSS 链接里的 securityId / ka 是一次性 tracking 参数，去掉后既短又不会过期。
+     * 其他站点保留完整查询串；超长或非法协议直接报业务错误，避免落到数据库触发误导性的 409。
+     */
+    private String normalizeUrl(String raw) {
+        if (raw == null) return null;
+        String value = raw.trim();
+        if (value.isEmpty()) return null;
+        URI uri;
+        try {
+            uri = URI.create(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("网址格式不正确");
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+            throw new IllegalArgumentException("网址只支持 http/https");
+        }
+        String host = uri.getHost();
+        String path = uri.getPath();
+        boolean boss = host != null && path != null && path.startsWith("/job_detail/")
+                && (host.equalsIgnoreCase("www.zhipin.com") || host.equalsIgnoreCase("zhipin.com"));
+        if (boss) {
+            return scheme.toLowerCase() + "://" + host.toLowerCase() + path;
+        }
+        if (value.length() > MAX_URL_LENGTH) {
+            throw new IllegalArgumentException("网址不能超过 " + MAX_URL_LENGTH + " 个字符，请删除多余的 tracking 参数");
+        }
+        return value;
     }
 
     /** 公司+岗位 归一化哈希：trim + 小写后用 MD5，避免联合唯一索引超长 */
