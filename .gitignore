@@ -29,3 +29,8 @@ collect_salary.mjs
 extracted_draft.json
 extracted_draft.txt
 jd_screenshot.png
+
+# 公开仓库只保留 README.md，其余交付/内部文档本地留存、不入库
+1119交接.md
+ROADMAP.md
+修改方案/
